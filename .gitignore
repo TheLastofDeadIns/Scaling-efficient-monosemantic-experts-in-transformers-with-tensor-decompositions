@@ -1,0 +1,16 @@
+runs/*
+!runs/.gitkeep
+!runs/summary*.csv
+figures/*
+!figures/.gitkeep
+!figures/*.pdf
+__pycache__/
+*.pyc
+*.ipynb
+.ipynb_checkpoints/
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.synctex.gz
