@@ -142,6 +142,43 @@ def key_frequencies(power: np.ndarray, thresh: float = 0.05) -> np.ndarray:
     return np.flatnonzero(pooled >= thresh) + 1
 
 
+def pooled_spectrum(power: np.ndarray) -> np.ndarray:
+    p = power.reshape(-1, power.shape[-1]).mean(axis=0)
+    return p / p.sum()
+
+
+def effective_n_freqs(power: np.ndarray) -> float:
+    """Participation ratio of the pooled spectrum: 1 / sum(p_k^2).
+
+    Threshold-free count of how many frequencies the layer actually uses.
+    One pure tone gives 1; a flat spectrum gives the number of frequencies.
+    """
+    p = pooled_spectrum(power)
+    return float(1.0 / (p ** 2).sum())
+
+
+def n_freqs_for_mass(power: np.ndarray, mass: float = 0.9) -> int:
+    """How many frequencies are needed to cover ``mass`` of pooled power."""
+    p = np.sort(pooled_spectrum(power))[::-1]
+    return int(np.searchsorted(np.cumsum(p), mass) + 1)
+
+
+def weighted_purity(power: np.ndarray, table: np.ndarray) -> tuple[float, float]:
+    """Purity averaged with weights proportional to each unit's L2 norm.
+
+    Unused units carry no signal but still produce a noise spectrum, which
+    drags an unweighted mean down as soon as many experts go unused.  Also
+    returns the fraction of units whose norm is below 1% of the largest.
+    """
+    t = table.reshape(-1, table.shape[-1])
+    pur = spectral_purity(power).reshape(-1)
+    w = np.linalg.norm(t - t.mean(-1, keepdims=True), axis=-1)
+    dead = float((w < 0.01 * w.max()).mean()) if w.max() > 0 else 1.0
+    if w.sum() <= 0:
+        return float(pur.mean()), dead
+    return float((pur * w).sum() / w.sum()), dead
+
+
 # --------------------------------------------------------------------------- #
 # router reconstruction
 # --------------------------------------------------------------------------- #
@@ -284,6 +321,10 @@ def analyse(run: Run, purity_thresh: float = 0.5) -> dict:
             basis_mono_frac=float((pur >= purity_thresh).mean()),
             basis_key_freqs=",".join(map(str, key_frequencies(pa))),
             basis_n_key_freqs=len(key_frequencies(pa)),
+            basis_eff_freqs=effective_n_freqs(pa),
+            basis_freqs90=n_freqs_for_mass(pa),
+            basis_purity_w=weighted_purity(pa, basis[0])[0],
+            basis_dead_frac=weighted_purity(pa, basis[0])[1],
         )
 
     tabs = router_tables(run)
@@ -298,6 +339,8 @@ def analyse(run: Run, purity_thresh: float = 0.5) -> dict:
             router_mono_frac=float((pur >= purity_thresh).mean()),
             router_key_freqs=",".join(map(str, key_frequencies(p1))),
             router_n_key_freqs=len(key_frequencies(p1)),
+            router_eff_freqs=effective_n_freqs(p1),
+            router_purity_w=weighted_purity(p1, tabs[0])[0],
             router_natural=router_split_is_natural(run),
         )
 
@@ -342,8 +385,9 @@ if __name__ == "__main__":
 
     df = summarise(args.run_dir, args.pattern)
     cols = [c for c in ("arch", "n_experts", "grok_step", "test_acc",
-                        "basis_purity_mean", "basis_n_key_freqs",
-                        "router_purity_mean", "router_n_key_freqs",
+                        "basis_purity_w", "basis_eff_freqs",
+                        "basis_freqs90", "basis_dead_frac",
+                        "router_purity_w", "router_eff_freqs",
                         "freq_agreement") if c in df.columns]
     print(df[cols].to_string(index=False))
     print(f"\nwhite-noise purity baseline: {random_baseline_purity():.4f}")
