@@ -58,7 +58,13 @@ def save(fig, out: Path, name: str):
 def keep(runs: list[Run], train_frac: float | None = 0.8) -> list[Run]:
     if train_frac is None:
         return runs
-    return [r for r in runs if abs(r.tcfg.get("train_frac", -1) - train_frac) < 1e-9]
+    out = [r for r in runs if abs(r.tcfg.get("train_frac", -1) - train_frac) < 1e-9]
+    # keep only the main-grid configuration: ablation runs share arch and
+    # n_experts with it and would otherwise be picked up by pick()
+    return [r for r in out
+            if r.mcfg.get("router_split", "natural") == "natural"
+            and abs(float(r.mcfg.get("lambda_aux", 1e-3)) - 1e-3) < 1e-12
+            and bool(r.tcfg.get("decay_router_keys", True))]
 
 
 def pick(runs: list[Run], arch: str, n_experts: int | None = None) -> Run | None:
@@ -100,36 +106,56 @@ def fig_grokking(runs: list[Run], out: Path, n_experts: int = 256):
 # --------------------------------------------------------------------------- #
 
 def fig_scaling(runs: list[Run], out: Path):
-    fig, ax = plt.subplots(figsize=(5, 3.4))
-    fails = []
+    """Grokking step against expert count, averaged over seeds."""
+    from collections import defaultdict
+
+    fig, ax = plt.subplots(figsize=(6, 3.8))
+    fails, partial = [], []
     for a in ARCH_ORDER:
         if a == "mlp":
             continue
-        pts = sorted((r.summary["n_experts"], r.summary["grok_step"])
-                     for r in runs if r.arch == a)
-        if not pts:
+        by_n = defaultdict(list)
+        for r in runs:
+            if r.arch == a:
+                by_n[r.summary["n_experts"]].append(r.summary["grok_step"])
+        if not by_n:
             continue
-        xs = [p[0] for p in pts]
-        ys = [p[1] if p[1] > 0 else np.nan for p in pts]
-        ax.plot(xs, ys, "o-", color=COLORS[a], lw=1.3, ms=4, label=ARCH_LABEL[a])
-        fails.extend((p[0], a) for p in pts if p[1] < 0)
+        xs, ys, es = [], [], []
+        for n in sorted(by_n):
+            ok = [v for v in by_n[n] if v > 0]
+            if not ok:
+                fails.append((n, a))
+                continue
+            xs.append(n)
+            ys.append(float(np.mean(ok)))
+            es.append(float(np.std(ok, ddof=1)) if len(ok) > 1 else 0.0)
+            if len(ok) < len(by_n[n]):
+                partial.append((n, ys[-1], a))
+        if xs:
+            ax.errorbar(xs, ys, yerr=es, fmt="o-", color=COLORS[a], lw=1.3,
+                        ms=4, capsize=3, label=ARCH_LABEL[a], zorder=3)
+
+    mlp = [r.summary["grok_step"] for r in runs
+           if r.arch == "mlp" and r.summary["grok_step"] > 0]
+    if mlp:
+        ax.axhline(float(np.mean(mlp)), color="k", ls="--", lw=1, label="Dense MLP")
+
+    ax.set_xscale("log", base=2)
+    ax.set_yscale("log")
+
+    for n, y, a in partial:
+        ax.plot([n], [y], "o", mfc="white", mec=COLORS[a], ms=7, mew=1.6, zorder=5)
 
     if fails:
-        y = ax.get_ylim()[1] * 1.04
-        for x, a in fails:
-            ax.plot([x], [y], "x", color=COLORS[a], ms=8, mew=2)
-        ax.text(0.02, 0.97, "x = no generalisation within budget",
-                transform=ax.transAxes, fontsize=7, va="top")
+        lo, hi = ax.get_ylim()
+        ax.set_ylim(lo, hi * 3.0)
+        for n, a in fails:
+            ax.plot([n], [hi * 1.5], "x", color=COLORS[a], ms=8, mew=2, zorder=5)
 
-    mlp = pick(runs, "mlp")
-    if mlp and mlp.summary["grok_step"] > 0:
-        ax.axhline(mlp.summary["grok_step"], color="k", ls="--", lw=1,
-                   label="Dense MLP")
-    ax.set_xscale("log", base=2)
     ax.set_xlabel("number of composed experts $N$")
     ax.set_ylabel("steps to 95% test accuracy")
-    ax.set_title("Factorisation sets the sign of the expert-count effect")
-    ax.legend(fontsize=7)
+    ax.set_title("The expert-count effect has no single sign")
+    ax.legend(fontsize=7, loc="center left", bbox_to_anchor=(1.01, 0.5))
     save(fig, out, "fig2_grok_vs_experts")
 
 
@@ -154,7 +180,7 @@ def fig_freq_vs_grok(runs: list[Run], out: Path):
     ax.set_xscale("log")
     ax.set_xlabel("effective number of frequencies in the shared basis")
     ax.set_ylabel("steps to 95% test accuracy")
-    ax.set_title("Narrower frequency bases generalise sooner")
+    ax.set_title("Frequency budget against generalisation speed")
     ax.legend(fontsize=7)
     save(fig, out, "fig3_freqs_vs_grok")
 
@@ -164,34 +190,43 @@ def fig_freq_vs_grok(runs: list[Run], out: Path):
 # --------------------------------------------------------------------------- #
 
 def fig_purity(runs: list[Run], out: Path, n_experts: int = 256):
-    labels, bas, rout = [], [], []
-    for a in ARCH_ORDER:
-        rs = [r for r in runs if r.arch == a and r.summary["grok_step"] > 0]
-        if not rs:
-            continue
-        at_n = [x for x in rs if x.summary["n_experts"] == n_experts]
-        r = at_n[0] if at_n else max(rs, key=lambda x: x.summary["n_experts"])
-        b = basis_tables(r)
-        if b is None:
-            continue
-        labels.append(f"{ARCH_LABEL[a]}\nN={r.summary['n_experts']}")
-        bas.append(weighted_purity(fft_power(b[0]), b[0])[0])
-        t = router_tables(r)
-        rout.append(weighted_purity(fft_power(t[0]), t[0])[0] if t else np.nan)
+    """Basis and router spectral purity against expert count."""
+    from collections import defaultdict
 
-    x = np.arange(len(labels))
-    fig, ax = plt.subplots(figsize=(7, 3.4))
-    ax.bar(x - 0.2, bas, 0.4, label="shared basis", color="#3b6ea5")
-    ax.bar(x + 0.2, rout, 0.4, label="router keys", color="#d1874a")
-    ax.axhline(random_baseline_purity(), color="k", ls=":", lw=1,
-               label="white noise")
-    ax.set_xticks(x, labels, fontsize=7)
-    ax.set_ylabel("norm-weighted spectral purity")
-    ax.set_title("Interpretable structure sits in the basis, not in the router")
-    ax.set_ylim(0, 1.05)
-    ax.legend(fontsize=7, loc="upper left", bbox_to_anchor=(1.01, 1.0))
-    ax.text(0.0, -0.32, "Unfactorised MoE is shown at N=64: it does not "
-            "generalise at N=256.", transform=ax.transAxes, fontsize=7)
+    fig, axes = plt.subplots(1, 2, figsize=(9, 3.4), sharey=True)
+    for a in ARCH_ORDER:
+        bas, rout = defaultdict(list), defaultdict(list)
+        for r in runs:
+            if r.arch != a:
+                continue
+            n = r.summary["n_experts"]
+            b = basis_tables(r)
+            if b is not None:
+                bas[n].append(weighted_purity(fft_power(b[0]), b[0])[0])
+            t = router_tables(r)
+            if t is not None:
+                rout[n].append(weighted_purity(fft_power(t[0]), t[0])[0])
+        for ax, d in ((axes[0], bas), (axes[1], rout)):
+            if not d:
+                continue
+            xs = sorted(d)
+            ys = [float(np.mean(d[n])) for n in xs]
+            es = [float(np.std(d[n], ddof=1)) if len(d[n]) > 1 else 0.0 for n in xs]
+            ax.errorbar(xs, ys, yerr=es, fmt="o-", color=COLORS[a], lw=1.3,
+                        ms=4, capsize=3, label=ARCH_LABEL[a])
+
+    floor = random_baseline_purity()
+    for ax, title in ((axes[0], "shared basis"), (axes[1], "router keys")):
+        ax.axhline(floor, color="k", ls=":", lw=1)
+        ax.set_xscale("log", base=2)
+        ax.set_xlabel("number of composed experts $N$")
+        ax.set_title(title, fontsize=9)
+    axes[0].set_ylabel("norm-weighted spectral purity")
+    axes[0].set_ylim(0, 1.02)
+    axes[1].text(0.98, floor + 0.035, "white noise", fontsize=7, ha="right",
+                 transform=axes[1].get_yaxis_transform())
+    axes[1].legend(fontsize=7, loc="center left", bbox_to_anchor=(1.01, 0.5))
+    fig.suptitle("Scaling preserves the basis and empties the router", y=1.03)
     save(fig, out, "fig4_purity_basis_vs_router")
 
 
@@ -248,6 +283,7 @@ def fig_tables(runs: list[Run], out: Path, arch: str = "moe_tucker", n_experts: 
                       interpolation="nearest")
         top[j].set_title(f"{ARCH_LABEL[r.arch]}: {title}", fontsize=9)
         top[j].set_xticks([]); top[j].grid(False)
+        top[j].set_xlabel("operand $a$", fontsize=8)
         p = pooled_spectrum(fft_power(M))
         bot[j].stem(np.arange(1, len(p) + 1), p, basefmt=" ", markerfmt=".")
         bot[j].set_xlabel("frequency $k$")
