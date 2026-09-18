@@ -1,9 +1,6 @@
 # Scaling Efficient Monosemantic Experts in Transformers with Tensor Decompositions
 
 Course paper, HSE Faculty of Computer Science.
-Supervisor: S. A. Kudryashov · Co-supervisor: M. V. Rakhuba
-
-## What this is
 
 Mixture-of-Experts layers are proposed as a route to interpretable models, on the
 argument that scaling the expert count makes individual experts monosemantic. That
