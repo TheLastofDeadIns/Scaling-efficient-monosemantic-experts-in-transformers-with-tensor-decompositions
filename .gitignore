@@ -14,3 +14,16 @@ paper/*.out
 paper/*.bbl
 paper/*.blg
 paper/*.synctex.gz
+*.npz
+runs/
+runs_rank/
+runs_mixed/
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls

@@ -195,6 +195,8 @@ def fig_purity(runs: list[Run], out: Path, n_experts: int = 256):
 
     fig, axes = plt.subplots(1, 2, figsize=(9, 3.4), sharey=True)
     for a in ARCH_ORDER:
+        if a == "mlp":            # no experts: nothing to place on this axis
+            continue
         bas, rout = defaultdict(list), defaultdict(list)
         for r in runs:
             if r.arch != a:
@@ -223,7 +225,7 @@ def fig_purity(runs: list[Run], out: Path, n_experts: int = 256):
         ax.set_title(title, fontsize=9)
     axes[0].set_ylabel("norm-weighted spectral purity")
     axes[0].set_ylim(0, 1.02)
-    axes[1].text(0.98, floor + 0.035, "white noise", fontsize=7, ha="right",
+    axes[1].text(0.02, floor + 0.035, "white noise", fontsize=7, ha="left",
                  transform=axes[1].get_yaxis_transform())
     axes[1].legend(fontsize=7, loc="center left", bbox_to_anchor=(1.01, 0.5))
     fig.suptitle("Scaling preserves the basis and empties the router", y=1.03)
