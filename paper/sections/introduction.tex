@@ -62,31 +62,40 @@ seeds per configuration.
   CP layers, pushes it back for Tensor-Train and product-key layers, and
   destroys it outright for independent experts past $N = 64$. The claim that
   more experts is better is therefore not a property of mixtures of experts.
-  Nor, contrary to what we expected at the outset, is it settled by whether the
-  expert tensor is factorised at all: Tensor-Train shares a basis as thoroughly as Tucker and keeps it as clean over the middle of the range, yet scales in the opposite direction.
+  Nor, contrary to what we expected at the outset, is it settled by whether
+  the expert tensor is factorised at all: Tensor-Train shares a basis as
+  thoroughly as Tucker and keeps it as clean over the middle of the range, yet
+  scales in the opposite direction.
 
-\item \textbf{Shared bases act as a sparsity prior in the task's own basis.}
-  A Tucker-factorised layer solves modular addition using an effective 1.5 to 1.8 frequencies at every expert count we test, where a dense MLP spends
-  $38.1$. The product-key layers begin in the same place and lose that
-  compression as they grow, reaching $29.3$ frequencies at $N = 4096$ with a
-  spectral purity of $0.150$ against a white-noise floor of $0.082$.
+\item \textbf{A shared basis can act as a sparsity prior in the task's own
+  basis, but does not always.} A Tucker-factorised layer solves modular
+  addition using an effective $1.5$ to $1.8$ frequencies at every expert count
+  we test, where a dense MLP spends $38.1$. The product-key layers begin in
+  the same place and lose that compression as they grow, reaching $29.3$
+  frequencies at $N = 4096$ with a spectral purity of $0.150$ against a
+  white-noise floor of $0.082$. CP is the exception that fixes the scope of
+  the claim: it shares a basis and broadens it, from $14.1$ to $35.6$
+  frequencies, while its units become purer.
 
 \item \textbf{Scaling drains the router of algorithmic structure, not of all
   structure.} As the expert count grows from $16$ to $4096$, the spectral
-  purity of the router keys falls to the white-noise floor in every one of the
-  six mixture architectures --- to $0.048$--$0.093$ against a floor of $0.082$
-  --- while a Tucker layer's shared basis holds purity above $0.95$. Yet on a
-  two-subtask control in which the subtask is signalled in the input, the same
-  routers at the same expert count support MONET's attribution criterion
-  perfectly, selecting factors whose ablation destroys one subtask and spares
-  the other. Routing scores recover partitions the input already carries and
-  miss the structure that performs the computation, and nothing in the method
-  distinguishes the two cases.
+  purity of the router keys falls to the white-noise floor in every mixture
+  architecture, at the largest expert count each is run at --- to
+  $0.048$--$0.093$ against a floor of $0.082$ --- while a Tucker layer's
+  shared basis holds purity above $0.95$. Yet on a two-subtask control in
+  which the subtask is signalled in the input, the same routers at the same
+  expert count support MONET's attribution criterion perfectly, selecting
+  factors whose ablation destroys one subtask and spares the other. Routing
+  scores recover partitions the input already carries and miss the structure
+  that performs the computation, and nothing in the method distinguishes the
+  two cases.
 
-\item \textbf{A ground-truth testbed.} We release an algorithmic benchmark on
-  which claims about expert monosemanticity can be checked against a known
-  answer, together with three mutually consistent metrics: effective frequency
-  count, norm-weighted spectral purity, and router--basis spectral overlap.
+\item \textbf{A ground-truth testbed.} We build on the standard
+  modular-addition setting a protocol in which claims about expert
+  monosemanticity can be checked against a known answer, together with three
+  metrics that measure different things --- effective frequency count,
+  norm-weighted spectral purity, and router--basis spectral overlap --- and
+  with code and run summaries released alongside.
 \end{enumerate}
 
 \subsection{Scope}

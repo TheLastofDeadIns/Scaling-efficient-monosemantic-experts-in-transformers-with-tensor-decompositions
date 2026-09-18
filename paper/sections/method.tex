@@ -38,7 +38,7 @@ how the expert tensor is represented: unfactorised, MONET-HD, MONET-VD, CP
 output modes use rank $32$ and the two expert modes rank $\min(32, n)$; CP uses
 a single shared rank of $128$ and Tensor-Train a uniform bond rank of $16$.
 These ranks are not matched across architectures, and
-Section~\ref{sec:limitations} returns to what that leaves open..
+Section~\ref{sec:limitations} returns to what that leaves open.
 
 We sweep $n \in \{4, 8, 16, 32, 64\}$, that is $N$ from $16$ to $4096$. The
 unfactorised layer is capped at $n \le 32$, since its parameter count grows
@@ -82,7 +82,7 @@ mechanism.
 The seed controls weight initialisation only. The train/test partition is
 identical across seeds, so the reported spread measures variation due to
 initialisation at fixed data, not variation due to resampling. We use three seeds for the main grid and for the router-key decay ablation;
-the remaining ablations and sweeps use seed $0$ and are marked as such..
+the remaining ablations and sweeps use seed $0$ and are marked as such.
 
 \subsection{Metrics}
 

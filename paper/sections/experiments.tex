@@ -73,7 +73,7 @@ structure that implements the algorithm reside?
 Four ablations isolate mechanisms that would otherwise remain conjectural.
 
 \paragraph{Router-key weight decay.} Whether the router keys are subject to
-weight decay. Under one-hot inputs the keys form a lookup table of $4 n P$
+weight decay. Under one-hot inputs the keys form a lookup table of $8 n P$
 free parameters addressed directly by the operand value. If the usual
 convention of exempting router parameters from decay is followed, that table
 constitutes an unregularised memorisation mechanism, and the prediction is
@@ -98,7 +98,7 @@ dominate the gradient.
 shared-basis and a product-key layer, locating the data threshold at which
 each architecture stops generalising.
 
-\subsection{What we deliberately do not measure}
+\subsection{What the single task cannot measure}
 
 One family of metrics is absent from this study by design. Both MONET and
 \citet{oldfield2024mumoe} score expert specialisation over classes or domains:

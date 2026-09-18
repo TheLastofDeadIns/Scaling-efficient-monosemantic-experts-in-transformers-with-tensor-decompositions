@@ -26,7 +26,7 @@ Two mechanisms plausibly set the two edges, and the ablations let us say
 something about each rather than speculate.
 
 The upper edge is at least partly the router. Under one-hot inputs the router
-keys form a table of $4nP$ parameters addressed directly by the operand, and it
+keys form a table of $8nP$ parameters addressed directly by the operand, and it
 grows linearly in $n$. Section~\ref{sec:res-ablations} shows this is a real
 memorisation channel and not a hypothetical one: at $N = 4096$, exempting those
 keys from weight decay costs MONET-HD generalisation outright, and at a $50\%$
@@ -62,8 +62,7 @@ account stands as it is, since the router ablation supports it directly.
 
 The router result is the one that does not depend on which architecture is
 better. Across all six mixture layers, and regardless of whether that layer
-generalises sooner or later with scale, the spectral purity of the router keys
-falls as experts are added, reaching the white-noise floor by $N = 4096$. In
+generalises sooner or later with scale, the spectral purity of the router keys falls as experts are added, reaching the white-noise floor at the largest expert count each is run at. In
 the same layers where the shared basis stays clean --- Tucker at purity
 $0.951$, Tensor-Train at $0.976$ on the seeds that behave --- the router has
 fallen to $0.048$ and $0.059$. The computation and the routing end up in
@@ -167,7 +166,8 @@ suggestive.
 \paragraph{Degradation factors are lower bounds.} Failed runs are excluded
 from the averages rather than assigned the step budget, so a statement such as
 ``MONET-HD degrades by $7.4\times$'' compares the seeds that survived at each
-expert count. Where some seeds fail at
+expert count. Where some seeds fail at the larger count, as at $N = 4096$, the
+true degradation is worse than the figure given.
 
 \paragraph{Frequency sparsity is a correlate, not a law.} Within the mixture
 family, narrower frequency budgets accompany earlier generalisation, but the

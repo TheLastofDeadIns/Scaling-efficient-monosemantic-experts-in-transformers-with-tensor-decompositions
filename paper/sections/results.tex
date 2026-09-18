@@ -152,7 +152,7 @@ separates the architectures differently from Table~\ref{tab:scaling}. Tucker
 and Tensor-Train both hold a narrow, clean basis as the layer grows: Tucker
 between $1.5$ and $1.8$ effective frequencies across a $256\times$ range, and
 Tensor-Train at $1.1$ and $1.2$ at $N = 256$ and $N = 1024$, with purity above
-$0.94$ at those two counts
+$0.94$ at those two counts.
 CP broadens steadily ($14.1 \to 35.6$) while its purity nonetheless rises, and
 the product-key layers deteriorate on both measures at once --- MONET-HD from
 purity $0.891$ and $8.5$ frequencies to $0.150$ and $29.3$, MONET-VD from
@@ -229,7 +229,7 @@ what happens to it.
 \centering
 \caption{Norm-weighted spectral purity of the router keys against expert count,
 mean over three seeds. Values at or below the white-noise reference of $0.082$
-are in bold. Every architecture decays; none recovers.}
+are in bold. Every architecture ends at or near the floor, though the descent is not monotone for the product-key layers.}
 \label{tab:router-scaling}
 \footnotesize
 \begin{tabular}{lrrrrrr}
@@ -256,8 +256,7 @@ structure.
 
 The contrast with the basis is sharpest where the basis survives. A Tucker
 layer at $N = 4096$ has basis purity $0.951$ and router purity $0.048$: the
-computation sits entirely in the shared factors, and the routing weights carry
-less frequency structure than random numbers. Figure~\ref{fig:purity} compares
+computation sits entirely in the shared factors, and the the routing weights carry no more frequency structure than random numbers. Figure~\ref{fig:purity} compares
 the two components across architectures, and Figure~\ref{fig:tables} shows them
 side by side for a single layer. A complementary measure --- the overlap
 between the pooled router spectrum and the pooled basis spectrum, computed on
@@ -447,8 +446,7 @@ Ablation & Architecture & \multicolumn{3}{c}{Grokking step} \\
 \end{table}
 
 \paragraph{Router-key decay matters where memorisation is cheap.} Under one-hot
-inputs the router keys form a table of $4nP$ parameters addressed directly by
-the operand value --- $7232$ of them at $N = 256$ and $28\,928$ at $N = 4096$.
+inputs the router keys form a table of $8nP$ parameters addressed directly by the operand value --- $14\,464$ of them at $N = 256$ and $57\,856$ at $N = 4096$.
 Exempting them from weight decay, as is conventional for router parameters,
 leaves that table unregularised. At the $80\%$ training fraction used throughout, the cost appears only where
 the table is largest, and it is decisive there. Over three seeds at
@@ -476,7 +474,8 @@ therefore due to structural alignment rather than to factorisation as such, and
 the effect is large enough to state plainly rather than file under caveats. It
 is also informative that the two architectures depend on it to different
 degrees: alignment is what lets the product-key layer work here at all, while
-for Tucker it is an accelerant.
+for Tucker it is an accelerant. We have no account of why interleaving costs Tucker more than a random
+permutation does.
 
 \paragraph{The auxiliary losses do little.} MONET's uniformity and ambiguity
 terms move Tucker's grokking step from $500$ at $\lambda = 0$ to $600$ and
@@ -538,8 +537,8 @@ prediction fails on both counts. The grokking step still rises with expert
 count at every rank tested --- from $1400$ to $4300$ at rank $8$, from $2100$
 to $4700$ at rank $16$, from $5600$ to $7100$ at rank $32$ --- so the upward
 trend is not an artefact of the bottleneck we happened to fix. And raising the
-rank does not help at any expert count. It hurts everywhere, and beyond rank
-$16$ it opens a failure region that widens as the rank grows: at rank $64$ and
+rank does not help at any expert count. It helps at no expert count but one --- rank $16$ beats rank $8$ at $N = 1024$,
+$2000$ steps against $2800$ --- and beyond rank $16$ it opens a failure region that widens as the rank grows: at rank $64$ and
 $N = 256$ a layer holding over a million parameters fits the training set
 perfectly and reaches test accuracy $0.022$.
 
@@ -655,8 +654,11 @@ dense$^\dagger$ & $600$ \quad ($288$K) & $500$ \quad ($1090$K) & $533$ \quad ($1
 transition rather than a gradual trade-off. At ranks $1$ and $2$ the layer cannot fit the training set, let alone
 generalise. That much is closer to a structural fact than to a measurement: at
 $r = 1$ the layer computes a sum over heads of a linear map of the input times
-a scalar function of $a$ times a scalar function of $b$, and modular addition
-does not lie in that family. What the table adds is where the threshold sits
+a scalar function of $a$ times a scalar function of $b$, and and modular addition does not lie in that family: with $r = 1$ the
+head-dependent factors enter only as scalars, so the layer computes
+$s(a, b)\,\bigl(v_a(a) + v_b(b)\bigr)$ for a scalar $s$ and vectors
+$v_a, v_b \in \mathbb{R}^{P}$, and the class that maximises such an expression
+cannot depend on $a$ and $b$ jointly in the way $(a + b) \bmod P$ requires. What the table adds is where the threshold sits
 and what happens above it. At rank $4$ it fits but
 generalises only at the largest expert count. From rank $8$ upward it
 generalises everywhere, and from rank $16$ it is indistinguishable from the
@@ -668,9 +670,8 @@ architecture.
 rank-$32$ layer at $N = 4096$ holds $107\,616$ parameters against $1\,121\,376$
 for the dense core --- a factor of $10.4$ --- and generalises in $500$ steps
 against $533 \pm 58$. Measured across the sweep, the parameter growth from
-$N = 256$ to $N = 4096$ falls from $3.89\times$ to $1.81\times$. A coupling of
-rank $32$ out of a possible $1024$, or of rank $8$ out of $1024$ at a cost of
-one generalisation step in five, is all the task uses.
+$N = 256$ to $N = 4096$ falls from $3.89\times$ to $1.81\times$. A coupling of rank $32$ out of a possible $1024$ is all the task uses, and rank
+$8$ suffices at a cost of between a third and four fifths more steps.
 
 This bears directly on the objection MONET raises against multilinear expert
 layers (Section~\ref{sec:related}), that their parameter counts grow too

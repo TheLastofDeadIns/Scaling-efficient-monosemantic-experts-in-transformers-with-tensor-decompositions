@@ -90,15 +90,12 @@ We report three findings. First, the \emph{sign} of the effect of adding
 experts is set by the particular factorisation rather than by factorisation as
 such: time to generalisation falls with expert count for Tucker and CP layers,
 rises for Tensor-Train and product-key layers, and collapses into outright
-failure for independent experts beyond 64. Second, factorisations with a shared
-basis compress the frequency content of the learned representation by more than
-an order of magnitude relative to a dense layer, and the product-key layers lose
+failure for independent experts beyond 64. Second, the Tucker and Tensor-Train layers compress the frequency content of the learned representation by more than an order of magnitude relative to a dense layer, and the product-key layers lose
 that compression as they grow. 
 
 Third, scaling drains the router of algorithmic structure but not of all
 structure: as the expert count reaches 4096 the spectral purity of the router
-keys falls to the white-noise floor in every mixture architecture we test, to
-0.048--0.093 against a floor of 0.082, while a Tucker layer's shared basis
+keys falls to the white-noise floor in every mixture architecture, at the largest expert count each is run at, to 0.048--0.093 against a floor of 0.082, while a Tucker layer's shared basis
 stays clean --- yet on a two-subtask control whose subtask is signalled in the
 input, the same routers at the same scale support MONET's attribution
 criterion perfectly, selecting factors whose ablation destroys one subtask and
@@ -123,14 +120,10 @@ MONET, а также CP-, Tucker- и TT-разложения экспертно�
 Получены три результата. Во-первых, знак эффекта от увеличения числа
 экспертов определяется конкретным разложением, а не фактом факторизации как
 таковым: время до обобщения падает с ростом числа экспертов у Tucker- и
-CP-слоёв, растёт у TT- и продуктовых слоёв и переходит в полный отказ у независимых экспертов при более чем 64 экспертах. Во-вторых, разложения с общим базисом сжимают частотное
-содержание выученного представления более чем на порядок по сравнению с плотным
-слоем, а продуктовые слои теряют это сжатие по мере роста. 
+CP-слоёв, растёт у TT- и продуктовых слоёв и переходит в полный отказ у независимых экспертов при более чем 64 экспертах. Во-вторых, Tucker- и TT-слои сжимают частотное содержание выученного представления более чем на порядок по сравнению с плотным слоем, а продуктовые слои теряют это сжатие по мере роста. 
 
 В-третьих, масштабирование лишает роутер алгоритмической структуры, но не
-всякой: при 4096 экспертах спектральная чистота ключей падает до уровня белого
-шума во всех рассмотренных архитектурах --- до $0{,}048$--$0{,}093$ при пороге
-$0{,}082$, --- тогда как общий базис Tucker-слоя остаётся чистым. При этом на
+всякой: при 4096 экспертах спектральная чистота ключей падает до уровня белого шума во всех рассмотренных архитектурах, при наибольшем числе экспертов, до которого каждая доведена, --- до $0{,}048$--$0{,}093$ при пороге $0{,}082$, --- тогда как общий базис Tucker-слоя остаётся чистым. При этом на
 контрольной задаче из двух подзадач, признак которой явно подан на вход, те же
 роутеры при том же масштабе безошибочно поддерживают критерий MONET: отобранные
 по routing-score факторы при отключении уничтожают свою подзадачу и не задевают
@@ -145,6 +138,14 @@ $0{,}082$, --- тогда как общий базис Tucker-слоя оста�
 Mixture of experts, tensor decompositions, Tucker decomposition, mechanistic
 interpretability, monosemanticity, grokking, modular arithmetic, Fourier
 analysis.
+
+\section*{\foreignlanguage{russian}{Ключевые слова}}
+\addcontentsline{toc}{section}{\foreignlanguage{russian}{Ключевые слова}}
+\foreignlanguage{russian}{
+Смесь экспертов, тензорные разложения, разложение Такера, механистическая
+интерпретируемость, моносемантичность, гроккинг, модулярная арифметика,
+анализ Фурье.
+}
 
 \pagebreak
 
