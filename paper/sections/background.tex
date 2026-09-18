@@ -1,0 +1,184 @@
+\section{Background}
+\label{sec:background}
+
+This section fixes notation and states the three ingredients the rest of the
+paper combines: tensor decompositions, the Mixture-of-Experts layer viewed as
+a tensor, and the known solution of modular addition.
+
+\subsection{Tensors and the mode-$n$ product}
+
+A tensor of order $d$ is an element $\mathcal{W} \in \R^{I_1 \times \cdots
+\times I_d}$; its $n$-th index is its $n$-th \emph{mode}. Two operations are
+used throughout. The mode-$n$ unfolding $\mathcal{W}_{(n)} \in \R^{I_n \times
+\prod_{m \neq n} I_m}$ rearranges $\mathcal{W}$ into a matrix whose rows are
+indexed by mode $n$. The mode-$n$ product with a matrix $A \in \R^{J \times
+I_n}$, written $\mathcal{W} \times_n A$, contracts the $n$-th mode:
+\begin{equation}
+  (\mathcal{W} \times_n A)_{i_1 \ldots j \ldots i_d}
+  = \sum_{i_n = 1}^{I_n} \mathcal{W}_{i_1 \ldots i_n \ldots i_d} A_{j i_n}.
+\end{equation}
+Contracting a mode with a vector removes that mode. This is the operation that
+makes expert layers computable without materialising them: routing weights
+enter as vectors contracted against the expert mode.
+
+We use the following standard decompositions; see \citet{kolda2009tensor} for
+a full treatment.
+
+\paragraph{CP.} The canonical polyadic decomposition writes a tensor as a sum
+of $R$ rank-one terms,
+\begin{equation}
+  \mathcal{W} \approx \sum_{r=1}^{R} a^{(1)}_r \otimes a^{(2)}_r \otimes
+  \cdots \otimes a^{(d)}_r,
+  \qquad a^{(n)}_r \in \R^{I_n},
+\end{equation}
+costing $R \sum_n I_n$ parameters. It is maximally economical but rigid: one
+rank index is shared by every mode, so the modes cannot interact except
+through $r$.
+
+\paragraph{Tucker.} The Tucker decomposition retains a dense core tensor and
+compresses each mode separately,
+\begin{equation}
+  \mathcal{W} \approx \mathcal{Z} \times_1 A^{(1)} \times_2 A^{(2)} \cdots
+  \times_d A^{(d)},
+  \qquad \mathcal{Z} \in \R^{R_1 \times \cdots \times R_d},
+  \quad A^{(n)} \in \R^{I_n \times R_n},
+\end{equation}
+costing $\prod_n R_n + \sum_n I_n R_n$ parameters. The core grows
+exponentially in the order, which is the price of allowing every pair of modes
+to interact. CP is the special case in which the core is diagonal.
+
+\paragraph{Tensor-Train and Tensor-Ring.} The Tensor-Train decomposition
+\citep{oseledets2011tt} arranges the modes in a chain of third-order cores,
+\begin{equation}
+  \mathcal{W}_{i_1 \ldots i_d} \approx
+  \sum_{r_1 \ldots r_{d-1}}
+  G^{(1)}_{i_1 r_1} G^{(2)}_{r_1 i_2 r_2} \cdots G^{(d)}_{r_{d-1} i_d},
+\end{equation}
+costing $O(d I R^2)$ parameters, linear in the order rather than exponential.
+Tensor-Ring generalises it by closing the chain, so that the first and last
+cores share a rank index $R_1 > 1$ and the contraction becomes a trace.
+
+\paragraph{Hierarchical Tucker.} Instead of a chain, the modes may be arranged
+on a binary tree, with transfer tensors at internal nodes
+\citep{grasedyck2010hierarchical}. This retains the logarithmic depth of a
+hierarchy while keeping parameter count linear in the order. We do not train a
+hierarchical Tucker layer here; it is the natural extension of this study and
+is discussed in Section~\ref{sec:future}.
+
+\subsection{Mixture-of-Experts layers as tensors}
+
+A Mixture-of-Experts layer holds $N$ experts $E_1, \ldots, E_N$ and a router
+that produces weights $\gvec \in \R^N$, most of them zero, so that the layer
+computes $\sum_{i} \gvec_i E_i(x)$. When each expert is linear, its parameters
+form a matrix $W_i \in \R^{d_{\mathrm{out}} \times d_{\mathrm{in}}}$, and
+stacking them gives a third-order tensor
+\begin{equation}
+  \mathcal{W} \in \R^{d_{\mathrm{out}} \times d_{\mathrm{in}} \times N},
+  \qquad
+  y = \mathcal{W} \times_2 x \times_3 \gvec .
+  \label{eq:moe-tensor}
+\end{equation}
+Equation~\eqref{eq:moe-tensor} is the unifying view of this paper: an
+architecture is a choice of how to represent $\mathcal{W}$, and every layer we
+compare is one such choice.
+
+\paragraph{Product-key routing.} With $N$ experts a dense router costs $O(N)$.
+Product keys \citep{lample2019productkeys} avoid this by splitting the input
+into halves $x^{(1)}, x^{(2)}$, matching each against $n = \sqrt{N}$ sub-keys
+per head $h$, and indexing experts by the pair $(i,j)$:
+\begin{equation}
+  z^{(1)}_{hi} = \langle w^{(1)}_{hi}, x^{(1)} \rangle, \quad
+  z^{(2)}_{hj} = \langle w^{(2)}_{hj}, x^{(2)} \rangle, \quad
+  \gvec^{(1)}_h = \softmax\!\big(\TopK(z^{(1)}_h)\big), \quad
+  \gvec_{hij} = \gvec^{(1)}_{hi}\,\gvec^{(2)}_{hj}.
+  \label{eq:product-key}
+\end{equation}
+The weight on expert $(i,j)$ is thus a product of two independent choices,
+which is itself a rank-one constraint on the routing distribution.
+
+\paragraph{The architectures compared.} Splitting the expert index into two
+modes turns $\mathcal{W}$ into a fourth-order tensor in $\R^{d_{\mathrm{out}}
+\times d_{\mathrm{in}} \times n \times n}$, and the layers we compare are
+different representations of it.
+
+\emph{Unfactorised.} Every expert is stored separately, at cost $O(N \cdot
+d_{\mathrm{out}} d_{\mathrm{in}})$. No structure is shared.
+
+\emph{MONET-HD} \citep{park2025monet}. The expert is split horizontally into a
+bottom factor indexed by $i$ and a top factor indexed by $j$,
+\begin{equation}
+  E_{ij}(x) = V_j\, \sigma\!\big(U_i x + b^{(1)}_i\big) + b^{(2)}_j,
+  \qquad U_i \in \R^{m \times d_{\mathrm{in}}},\ V_j \in \R^{d_{\mathrm{out}}
+  \times m},
+  \label{eq:hd}
+\end{equation}
+so $2n$ factors generate $n^2$ experts and the parameter count grows as
+$\sqrt{N}$. Unlike the other layers here this one is not multilinear: the
+nonlinearity $\sigma$ sits between the two factors.
+
+\emph{MONET-VD.} The expert is instead split vertically, with the first half
+of the output produced from factor $i$ and the second half from factor $j$,
+each acting on a concatenation of both halves of the hidden state. The
+parameter count matches HD.
+
+\emph{CP, Tucker, TT.} Following \citet{oldfield2024mumoe}, the fourth-order
+tensor is given a CP, Tucker or Tensor-Train representation directly, with the
+two expert modes contracted against $\gvec^{(1)}_h$ and $\gvec^{(2)}_h$. These
+layers are multilinear: the output is a product of a factor depending on $x$
+and factors depending on each routing vector, with no elementwise
+nonlinearity between them.
+
+Table~\ref{tab:params} gives parameter counts for $P = 113$, $m = 8$ and four
+router heads. The contrast that matters is the growth rate: as $N$ increases
+by a factor of $256$, the unfactorised layer grows by $238\times$, the MONET
+layers by exactly $16 = \sqrt{256}$, and CP and Tensor-Train barely at all,
+since at large $n$ their parameter count is dominated by the router rather
+than by the experts.
+
+\begin{table}[t]
+\centering
+\caption{Parameter counts for $P=113$, expert dimension $m=8$, four router
+heads. The dense MLP baseline has $34\,113$ parameters.}
+\label{tab:params}
+\begin{tabular}{rrrrrrrr}
+\toprule
+$n$ & $N$ & Unfactorised & MONET-HD & MONET-VD & CP & Tucker & TT \\
+\midrule
+ 4 &   16 &      48\,944 &  14\,948 &  14\,948 & 48\,032 &    30\,880 & 64\,368 \\
+ 8 &   64 &     188\,544 &  29\,896 &  29\,896 & 52\,672 &    83\,744 & 69\,072 \\
+16 &  256 &     739\,712 &  59\,792 &  59\,792 & 61\,952 &   287\,968 & 78\,480 \\
+32 & 1024 &  2\,929\,920 & 119\,584 & 119\,584 & 80\,512 & 1\,090\,400 & 97\,296 \\
+64 & 4096 & 11\,661\,824 & 239\,168 & 239\,168 & 117\,632 & 1\,121\,376 & 134\,928 \\
+\midrule
+\multicolumn{2}{r}{growth $\times$} & 238.3 & 16.0 & 16.0 & 2.4 & 36.3 & 2.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Modular addition and its Fourier solution}
+
+The task is to predict $c = (a+b) \bmod P$ from a one-hot encoding of the pair
+$(a,b)$, with $P = 113$ prime. There are $P^2 = 12\,769$ examples in total.
+
+A network that generalises rather than memorises is known to implement a
+Fourier-multiplication algorithm \citep{nanda2023progress,bussmann2023modadd}.
+For a frequency $\omega_k = 2\pi k / P$ it represents each operand by
+$\cos(\omega_k a + \varphi_1)$ and $\cos(\omega_k b + \varphi_2)$, and the
+readout for class $c$ follows $\cos(\omega_k c + \varphi_1 + \varphi_2)$. The
+identity that makes this work is
+\begin{equation}
+  \sum_{k} \cos\!\big(\omega_k (a + b - c)\big)
+  \quad\text{is maximised exactly when}\quad c \equiv a + b \pmod P,
+\end{equation}
+so a network need only accumulate such terms over a handful of frequencies.
+
+Two consequences shape our methodology. First, the true features of this task
+are Fourier frequencies, and there are only $(P-1)/2 = 56$ of them, so
+``which feature does this unit represent'' has a definite answer and
+monosemanticity can be scored rather than illustrated. Second, since the
+operands are one-hot encoded, any weight matrix acting on the input is,
+restricted to the block of columns belonging to $a$, literally a function of
+$a$; its discrete Fourier transform is therefore directly interpretable. The
+same holds for router keys, which under one-hot inputs reduce to learned
+lookup tables indexed by the operand. Section~\ref{sec:method} turns these
+observations into metrics.

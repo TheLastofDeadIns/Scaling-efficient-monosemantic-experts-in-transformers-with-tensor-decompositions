@@ -80,6 +80,7 @@ class ModelConfig:
     tucker_rank: int = 32        # shared across all four modes
     tt_rank: int = 16            # R2 = R3 = R4
     tr_rank: int = 1             # R1; 1 => Tensor-Train, >1 => Tensor-Ring
+    comp_rank: int = 0           # 0 => dense core; r > 0 => rank-r expert-mode coupling
 
     # losses
     lambda_aux: float = 1e-3
@@ -354,18 +355,45 @@ class MoECP(_MoEBase):
 
 
 class MoETucker(_MoEBase):
-    """mu-MoE with a Tucker-factorised weight tensor."""
+    """mu-MoE with a Tucker-factorised weight tensor.
+
+    ``cfg.comp_rank`` controls how the core couples the two expert modes.
+    With ``comp_rank = 0`` the core is dense, which is the original layer.
+    With ``comp_rank = r > 0`` the (a, c) slice of the core is constrained to
+    rank r,
+
+        core[p, q, a, c] = sum_s W[p, q, s] Ca[s, a] Cb[s, c],
+
+    so r = 1 makes the dependence on the two routing vectors separable --- the
+    rank-one composition that product-key routing implements --- and large r
+    recovers the dense core.  The initialisation is matched so that the
+    entries of the implied core have the same variance at every r.
+    """
 
     def __init__(self, cfg: ModelConfig):
         super().__init__(cfg)
         R, n = cfg.tucker_rank, cfg.n_keys
         Ra = min(R, n)
         self.Ra = Ra
-        self.core = nn.Parameter(torch.randn(R, R, Ra, Ra) * (R ** -1.5))
+        self.comp_rank = getattr(cfg, "comp_rank", 0)
+        if self.comp_rank > 0:
+            r = self.comp_rank
+            self.W = nn.Parameter(
+                torch.randn(R, R, r) * (R ** -1.5) * Ra / (r ** 0.5))
+            self.Ca = nn.Parameter(torch.randn(r, Ra) * (Ra ** -0.5))
+            self.Cb = nn.Parameter(torch.randn(r, Ra) * (Ra ** -0.5))
+        else:
+            self.core = nn.Parameter(torch.randn(R, R, Ra, Ra) * (R ** -1.5))
         self.Gout = nn.Parameter(_kaiming((cfg.d_out, R), R))
         self.Gin = nn.Parameter(_kaiming((cfg.d_in, R), cfg.d_in))
         self.Ga = nn.Parameter(torch.randn(n, Ra) * 0.1 + 1.0)
         self.Gb = nn.Parameter(torch.randn(n, Ra) * 0.1 + 1.0)
+
+    def dense_core(self) -> torch.Tensor:
+        """The (R, R, Ra, Ra) core the layer represents, for verification."""
+        if self.comp_rank > 0:
+            return torch.einsum("pqs,sa,sc->pqac", self.W, self.Ca, self.Cb)
+        return self.core
 
     def experts(self, x, g1, g2):
         px = torch.einsum("bd,dq->bq", x, self.Gin)
@@ -373,7 +401,12 @@ class MoETucker(_MoEBase):
             px = self.act(px)
         pa = torch.einsum("bhi,ia->bha", g1, self.Ga)
         pb = torch.einsum("bhj,jc->bhc", g2, self.Gb)
-        core = torch.einsum("pqac,bq,bha,bhc->bp", self.core, px, pa, pb)
+        if self.comp_rank > 0:
+            ua = torch.einsum("sa,bha->bhs", self.Ca, pa)
+            ub = torch.einsum("sc,bhc->bhs", self.Cb, pb)
+            core = torch.einsum("pqs,bq,bhs,bhs->bp", self.W, px, ua, ub)
+        else:
+            core = torch.einsum("pqac,bq,bha,bhc->bp", self.core, px, pa, pb)
         return torch.einsum("bp,op->bo", core, self.Gout)
 
 

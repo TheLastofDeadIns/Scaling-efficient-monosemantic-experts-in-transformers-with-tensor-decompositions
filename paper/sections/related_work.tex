@@ -1,0 +1,122 @@
+\section{Related Work}
+\label{sec:related}
+
+Three lines of work meet in this study: attempts to make networks interpretable
+by changing their architecture, tensor-factorised Mixture-of-Experts layers,
+and the mechanistic analysis of grokking on modular arithmetic. They have
+developed largely independently, and part of the contribution here is to bring
+them into contact.
+
+\subsection{Polysemanticity and architectural remedies}
+
+The difficulty that motivates all of this is that individual neurons do not
+correspond to individual features. \citet{elhage2022superposition} give the
+standard account: when a network must represent more features than it has
+dimensions, it stores them in superposition, and each neuron responds to
+several unrelated inputs. Interpretability then requires disentangling
+features from neurons rather than reading neurons directly.
+
+Two families of response exist. The first leaves the model alone and analyses
+it afterwards, most prominently by training a sparse autoencoder on the
+activations to recover an overcomplete dictionary of features
+\citep{bricken2023monosemanticity}. This works on any pretrained model, but it
+introduces a second learned object whose own faithfulness must then be
+established.
+
+The second family changes the architecture so that the units are monosemantic
+by construction. \citet{park2025monet} are the fullest development of this
+idea. Their MONET layer replaces the feed-forward block with a very large
+mixture of experts and, crucially, does not store the experts separately: a
+layer is partitioned into $\sqrt{N}$ \emph{bottom} factors and $\sqrt{N}$
+\emph{top} factors, and expert $(i,j)$ is composed on demand from bottom
+factor $i$ and top factor $j$. Parameter count then scales as $\sqrt{N}$
+rather than $N$, which lets them instantiate $262\,144$ experts per layer.
+They report that experts specialise by domain, and demonstrate control by
+ablating experts associated with a programming language or with toxic content.
+
+Their evidence is correlational by construction. An expert is assigned to a
+domain when its routing score on that domain exceeds its score elsewhere by a
+factor of two, and toxicity experts are located by correlating routing scores
+with a toxicity label. The authors state plainly in their limitations that
+these selection criteria are rudimentary and that quantitative evaluation of
+automated interpretability remains open. The obstacle is not one of effort: on
+natural language there is no independent account of which features the model
+ought to represent, so a specialisation claim can be illustrated but not
+verified. \citet{bereska2024mechinterp}, surveying the field, make the same
+point from the other direction and call explicitly for algorithmic testbeds
+with known ground truth against which interpretability methods can be scored.
+
+\subsection{Factorised and large-scale mixtures of experts}
+
+Mixture-of-Experts layers were introduced to decouple parameter count from
+per-token compute \citep{shazeer2017moe}, with interpretability arriving much
+later as a secondary motivation. Scaling the number of experts runs into
+routing cost, since a naive softmax over $N$ experts is linear in $N$.
+\citet{lample2019productkeys} solve this with product keys: the query is split
+in half, each half is matched against $\sqrt{N}$ sub-keys, and the top-$k$
+over the Cartesian product is recovered from the top-$k$ of each half, giving
+$O(\sqrt{N})$ routing. \citet{he2024peer} combine product-key routing with
+single-neuron experts to reach a million experts per layer. In both, the
+experts themselves remain independent parameters; only the routing is
+factorised.
+
+\citet{oldfield2024mumoe} take the further step of factorising the experts.
+They observe that the parameters of $N$ linear experts form a third-order
+tensor in $\R^{d_{\mathrm{out}} \times d_{\mathrm{in}} \times N}$, and replace
+it with a CP or Tucker factorisation, so that the layer computes a multilinear
+function of the input and the expert-coefficient vector without ever
+materialising the individual experts. They report that expert specialisation
+increases with expert count, measuring it by the drop in per-class accuracy
+when an expert is ablated. MONET criticises this line for parameter counts
+that still grow linearly in $N$ at fixed rank, and positions product-key
+composition as the more economical alternative.
+
+This disagreement is the starting point of the present work. Product-key
+composition and a CP or Tucker factorisation are both factorisations of the
+same expert tensor; they differ in how much structure is shared across
+experts, and the literature compares them on cost rather than on what they do
+to the function the network learns.
+
+\subsection{Grokking and modular arithmetic}
+
+\citet{power2022grokking} observed that small networks trained on algorithmic
+tasks fit the training set almost immediately while test accuracy remains at
+chance for thousands of further steps, then rises sharply. The delay makes the
+transition from memorisation to generalisation externally visible as a single
+number, which is what we exploit.
+
+For modular addition the generalising solution has been reverse-engineered in
+full. \citet{nanda2023progress} show that a one-layer transformer trained on
+$c = (a+b) \bmod P$ represents the operands through a small set of Fourier
+frequencies, multiplies the corresponding trigonometric terms through the
+attention and MLP blocks, and reads out the logit for $c$ as a sum of
+$\cos(\omega(a+b-c))$ terms; they use progress measures derived from this
+structure to show that the algorithm forms gradually, well before test
+accuracy moves. \citet{bussmann2023modadd} gives the corresponding analysis
+for a plain MLP, where each hidden neuron approximates
+$\mathrm{ReLU}\!\left(\cos(\omega a + \varphi_1) + \cos(\omega b +
+\varphi_2)\right)$ and its outgoing weights follow $\cos(\omega c + \varphi_1
++ \varphi_2)$; notably, the MLP spreads its representation over a broad range
+of frequencies rather than selecting a few, in contrast to the transformer.
+\citet{chughtai2023universality} extend the picture to general group
+composition and find only weak universality across seeds, which is the main
+reason we report multiple seeds rather than a single run.
+
+What this literature provides, and what is missing everywhere else in the
+interpretability of expert layers, is an answer key. The features a
+generalising network must represent are known exactly and there are only
+$(P-1)/2$ of them, so the question of whether a unit is monosemantic has a
+definite answer.
+
+\subsection{Positioning}
+
+Against this background our study occupies an otherwise empty position. The
+MoE-interpretability literature evaluates specialisation on natural data
+without ground truth; the tensor-decomposition literature compares
+factorisations on parameter count and downstream accuracy; the grokking
+literature analyses dense architectures. We hold the task, the data and the
+optimisation protocol fixed, vary only the factorisation of the expert tensor,
+and measure both when the generalising algorithm is found and what its learned
+representation looks like in the basis the task itself defines. To our
+knowledge the relationship between expert-tensor factorisation and the
+memorisation-to-generalisation transition has not previously been measured.

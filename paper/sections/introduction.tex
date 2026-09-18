@@ -1,0 +1,105 @@
+\section{Introduction}
+
+\subsection{Motivation}
+
+A neuron in a trained network rarely stands for one thing. It responds to
+several unrelated inputs at once, a property usually called polysemanticity,
+and it is the main obstacle to reading a model's computation off its weights.
+One response to this is to change the architecture rather than the analysis:
+if a layer is built out of many narrow experts, each expert may end up
+responsible for a single feature, and the layer becomes legible by
+construction.
+
+\citet{park2025monet} push this idea furthest. Their MONET architecture stores
+experts not individually but as compositions: a layer is cut into a
+\emph{bottom} group of $\sqrt{N}$ factors and a \emph{top} group of
+$\sqrt{N}$ factors, and expert $(i,j)$ is assembled on demand from bottom
+factor $i$ and top factor $j$. The parameter count then grows as $\sqrt{N}$
+rather than $N$, which lets them place $262\,144$ experts in a single layer
+and report that experts specialise by domain: some route Python, others
+chemistry, others toxic text.
+
+The evidence for that specialisation is correlational. An expert is judged to
+belong to a domain when its routing score is skewed towards that domain, and
+toxicity experts are found by correlating routing scores with a toxicity
+label. The authors are explicit that these criteria are rudimentary and that
+quantitative evaluation of automated interpretability remains open. The deeper
+difficulty is that on natural language there is no ground truth: nobody knows
+what features a language model \emph{ought} to represent, so a claim that an
+expert is monosemantic cannot be checked, only illustrated.
+
+\subsection{Approach}
+
+We therefore move the question to a task where the answer is known. For
+$c = (a + b) \bmod P$ the generalising solution has been reverse-engineered
+completely \citep{nanda2023progress}: the network represents each operand
+through a small number of frequencies $\omega = 2\pi k / P$, computes
+$\cos(\omega a + \varphi_1)$ and $\cos(\omega b + \varphi_2)$, and reads out
+$\cos(\omega c + \varphi_1 + \varphi_2)$. The true features are Fourier
+frequencies, and there are only $(P-1)/2$ of them. Monosemanticity becomes
+measurable rather than merely illustrated: a unit is monosemantic exactly to the
+extent that its response, viewed as a function of the operand, is a single
+frequency.
+
+The task carries a second advantage. Models trained on it exhibit grokking:
+training accuracy saturates almost immediately while test accuracy stays at
+chance for thousands of steps, and only then jumps. The step at which this
+happens is a sharp, single-number measure of how hard it is for a given
+architecture to find the generalising algorithm rather than a lookup table.
+
+We replace the hidden layer of the reference MLP with seven alternatives ---
+a dense baseline, an unfactorised MoE, MONET's horizontal and vertical
+decompositions, and CP, Tucker and Tensor-Train factorisations of the expert
+tensor in the style of \citet{oldfield2024mumoe} --- and sweep the expert
+count from $16$ to $4096$ under an identical training protocol, with three
+seeds per configuration.
+
+\subsection{Contributions}
+
+\begin{enumerate}
+\item \textbf{The sign of the expert-count effect is set by the particular
+  factorisation.} Adding experts brings generalisation forward for Tucker and
+  CP layers, pushes it back for Tensor-Train and product-key layers, and
+  destroys it outright for independent experts past $N = 64$. The claim that
+  more experts is better is therefore not a property of mixtures of experts.
+  Nor, contrary to what we expected at the outset, is it settled by whether the
+  expert tensor is factorised at all: Tensor-Train shares a basis as thoroughly
+  as Tucker and keeps it as clean, yet scales in the opposite direction.
+
+\item \textbf{Shared bases act as a sparsity prior in the task's own basis.}
+  A Tucker-factorised layer solves modular addition using an effective $1.6$ to
+  $1.8$ frequencies at every expert count we test, where a dense MLP spends
+  $38.1$. The product-key layers begin in the same place and lose that
+  compression as they grow, reaching $29.3$ frequencies at $N = 4096$ with a
+  spectral purity of $0.150$ against a white-noise floor of $0.082$.
+
+\item \textbf{Scaling drains the router of algorithmic structure, not of all
+  structure.} As the expert count grows from $16$ to $4096$, the spectral
+  purity of the router keys falls to the white-noise floor in every one of the
+  six mixture architectures --- to $0.048$--$0.093$ against a floor of $0.082$
+  --- while a Tucker layer's shared basis holds purity above $0.95$. Yet on a
+  two-subtask control in which the subtask is signalled in the input, the same
+  routers at the same expert count support MONET's attribution criterion
+  perfectly, selecting factors whose ablation destroys one subtask and spares
+  the other. Routing scores recover partitions the input already carries and
+  miss the structure that performs the computation, and nothing in the method
+  distinguishes the two cases.
+
+\item \textbf{A ground-truth testbed.} We release an algorithmic benchmark on
+  which claims about expert monosemanticity can be checked against a known
+  answer, together with three mutually consistent metrics: effective frequency
+  count, norm-weighted spectral purity, and router--basis spectral overlap.
+\end{enumerate}
+
+\subsection{Scope}
+
+Two limitations bound these claims and are stated in full in
+Section~\ref{sec:limitations}. The multilinear ($\mu$MoE) layers compute a
+product of a function of $a$ and a function of $b$, which is structurally the
+same form as the Fourier solution. Section~\ref{sec:res-ablations} measures how
+much of their advantage follows from that alignment, by permuting the router's
+input so that its two halves are no longer the two operands; the answer is that
+a substantial part of it does. And all results are for a single task at a
+single modulus, with a fixed train/test partition and three seeds varying
+initialisation only, so they are reported as observations about this testbed
+rather than as properties of mixture-of-experts layers in general.

@@ -1,0 +1,143 @@
+\section{Rearranged Forward Passes}
+\label{app:forward}
+
+A factorised expert layer is useful only if it is never materialised. Written
+naively, a product-key layer sums over $H n^2$ terms per token; written
+correctly, the same quantity costs $O(H n)$. The rearrangement is where
+implementation errors hide, because a wrong contraction still trains and still
+drives the loss down --- it simply computes a different function than the one
+described. This appendix records the derivations and the check that was run
+against them.
+
+Throughout, $\gvec^{(1)}_{hi}$ and $\gvec^{(2)}_{hj}$ are the routing weights
+of Equation~\eqref{eq:product-key}, $x \in \R^{d_{\mathrm{in}}}$ is the input,
+and indices $i,j$ run over the $n$ factors per side.
+
+\subsection{Horizontal decomposition}
+
+With $E_{ij}$ as in Equation~\eqref{eq:hd}, the layer output is
+\begin{equation}
+  y = \sum_{h} \sum_{i} \sum_{j}
+      \gvec^{(1)}_{hi}\gvec^{(2)}_{hj}
+      \Big( V_j\, \sigma(U_i x + b^{(1)}_i) + b^{(2)}_j \Big).
+\end{equation}
+Write $z_i = \sigma(U_i x + b^{(1)}_i) \in \R^{m}$, computed once for each of
+the $n$ bottom factors. The first term factors as
+\begin{equation}
+  \sum_{h}\sum_{j} \gvec^{(2)}_{hj} V_j
+  \underbrace{\sum_{i} \gvec^{(1)}_{hi} z_i}_{t_h \in \R^{m}}
+  \;=\;
+  \sum_{j} V_j \underbrace{\sum_{h} \gvec^{(2)}_{hj} t_h}_{u_j \in \R^{m}},
+\end{equation}
+so the bottom factors are collapsed per head into $t_h$ and redistributed to
+the top factors as $u_j$, and the $n^2$ expert combinations never appear. The
+bias term collapses to $\sum_j c_j b^{(2)}_j$ with $c_j = \sum_h
+\gvec^{(2)}_{hj}\sum_i \gvec^{(1)}_{hi}$; when the routing weights are
+normalised the inner sum is one, recovering the form given by
+\citet{park2025monet}. We implement the general form, which is correct whether
+or not normalisation holds.
+
+\subsection{Vertical decomposition}
+
+Here expert $(i,j)$ produces the first half of the output from factor $i$ and
+the second half from factor $j$, each acting on both halves of the hidden
+state. With $p^{(1)}_i = \sigma(U^{(1)}_i x + b^{(1)}_i)$ and $p^{(2)}_j =
+\sigma(U^{(2)}_j x + b^{(2)}_j)$, the two output blocks are
+\begin{align}
+  y_{\mathrm{top}} &= \sum_i A_i V^{11}_i p^{(1)}_i
+                    + \sum_i V^{12}_i \sum_h \gvec^{(1)}_{hi}
+                      \sum_j \gvec^{(2)}_{hj} p^{(2)}_j
+                    + \sum_i A_i b^{12}_i, \\
+  y_{\mathrm{bot}} &= \sum_j B_j V^{22}_j p^{(2)}_j
+                    + \sum_j V^{21}_j \sum_h \gvec^{(2)}_{hj}
+                      \sum_i \gvec^{(1)}_{hi} p^{(1)}_i
+                    + \sum_j B_j b^{22}_j,
+\end{align}
+where $A_i = \sum_h \gvec^{(1)}_{hi}\sum_j \gvec^{(2)}_{hj}$ and $B_j = \sum_h
+\gvec^{(2)}_{hj}\sum_i \gvec^{(1)}_{hi}$. The cross terms are the reason this
+variant is more expensive than the horizontal one despite an identical
+parameter count: each requires an extra pass through the head index. Since
+$P = 113$ is odd, the output is split into blocks of $57$ and $56$.
+
+\subsection{Multilinear layers}
+
+For the CP layer with factors $G^{\mathrm{out}}, G^{\mathrm{in}},
+G^{(a)}, G^{(b)}$ of rank $R$,
+\begin{equation}
+  y = \sum_{h}\sum_{r}
+      G^{\mathrm{out}}_{r}
+      \big\langle G^{\mathrm{in}}_{r}, x \big\rangle
+      \big\langle G^{(a)}_{r}, \gvec^{(1)}_{h} \big\rangle
+      \big\langle G^{(b)}_{r}, \gvec^{(2)}_{h} \big\rangle,
+\end{equation}
+that is, three independent projections multiplied elementwise in rank space.
+Tucker replaces the elementwise product by a contraction against a dense core
+$\mathcal{Z}$, and Tensor-Train by a chain of three matrix products closed by
+$G^{(1)}$. In all three the expert modes are contracted directly against the
+routing vectors, so no expert is ever formed. Note that these layers apply no
+elementwise nonlinearity between the factors: the output is multilinear in
+$(x, \gvec^{(1)}, \gvec^{(2)})$, in contrast to the MONET variants.
+
+\subsection{Numerical verification}
+
+Each rearranged forward pass was re-implemented in NumPy using the same
+contraction expressions as the training code, and compared against a naive
+implementation that loops over all $H n^2$ expert combinations explicitly.
+Table~\ref{tab:verify} reports the maximum absolute deviation on random inputs
+and weights. All six agree to machine precision.
+
+\begin{table}[h]
+\centering
+\caption{Maximum absolute difference between the rearranged forward pass and
+the naive per-expert sum, over random inputs and weights.}
+\label{tab:verify}
+\begin{tabular}{lr}
+\toprule
+Layer & $\max |y_{\mathrm{fast}} - y_{\mathrm{naive}}|$ \\
+\midrule
+MONET-HD        & $2.2 \times 10^{-15}$ \\
+MONET-VD        & $3.6 \times 10^{-15}$ \\
+Unfactorised    & $8.9 \times 10^{-16}$ \\
+CP              & $1.1 \times 10^{-14}$ \\
+Tucker          & $2.0 \times 10^{-13}$ \\
+Tensor-Train    & $4.3 \times 10^{-14}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Implementation Details}
+\label{app:impl}
+
+\paragraph{Analysis without the model.} All spectral analysis is performed on
+NumPy from archived weights. The router is re-derived analytically: under
+one-hot inputs the logit of key $i$ in head $h$ for operand value $a$ is
+exactly the entry $w^{(1)}_{hia}$ of the key matrix, so no forward pass is
+needed and the reconstruction is exact rather than sampled. For the
+interleaved and random router splits the stored permutation is applied first.
+
+\paragraph{What counts as the shared basis.} For the dense MLP it is the first
+weight matrix; for MONET-HD the bottom factor $U$ reshaped to $(nm) \times
+d_{\mathrm{in}}$; for MONET-VD the concatenation of $U^{(1)}$ and $U^{(2)}$;
+for the multilinear layers the input factor. In each case the block of columns
+corresponding to operand $a$ is extracted and Fourier-transformed along that
+axis.
+
+\paragraph{Failed runs.} A run that does not reach $95\%$ test accuracy within
+$30\,000$ steps is recorded as a failure and excluded from averages over the
+grokking step, rather than being assigned the budget as a censored value.
+Assigning the budget would understate the gap between architectures that
+generalise late and architectures that do not generalise at all.
+
+\paragraph{Numerical conventions.} Spectra are computed after mean removal,
+over frequencies $k = 1, \ldots, 56$; the DC component is dropped. Power
+spectra are normalised to sum to one per unit before pooling. The white-noise
+purity reference of $0.082$ is the mean purity of $4096$ independent Gaussian
+vectors of length $113$ under the same procedure.
+
+\paragraph{Compute.} All runs were performed on a single NVIDIA T4. A typical
+run takes four to eleven minutes for $30\,000$ full-batch steps on $10\,215$
+training examples. Wall-clock time varies little with expert count, since at
+this scale the computation is dominated by kernel-launch overhead rather than
+arithmetic; observed runtimes therefore do not reflect the asymptotic cost of
+the architectures, and the comparison of efficiency in
+Table~\ref{tab:params} is made in parameters rather than seconds.

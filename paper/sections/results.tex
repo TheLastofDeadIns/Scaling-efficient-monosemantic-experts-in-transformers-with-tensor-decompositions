@@ -1,0 +1,678 @@
+\section{Results}
+\label{sec:results}
+
+All numbers are over three seeds, reported as mean $\pm$ standard deviation. A
+run that fails to reach $95\%$ test accuracy within $30\,000$ steps is recorded
+as a failure and excluded from averages rather than assigned the step budget; a
+bracketed fraction indicates how many seeds generalised where not all did.
+Ablations use seed $0$ only and are reported separately in
+Section~\ref{sec:res-ablations}.
+
+\subsection{Every architecture memorises immediately; they differ in when they stop}
+
+Figure~\ref{fig:grokking} shows training and test accuracy for all seven layer
+types at $N = 256$ composed experts. The qualitative picture is the same
+everywhere: training accuracy saturates within a few hundred steps, and test
+accuracy follows after a delay that ranges from a few hundred steps to never.
+The delay is what the architectures disagree about.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{fig1_grokking_curves.pdf}
+\caption{Training (left) and test (right) accuracy at $N = 256$ experts,
+seed 0. Every architecture fits the training set quickly; the gap to
+generalisation varies by more than an order of magnitude, and the unfactorised
+mixture (orange) never closes it.}
+\label{fig:grokking}
+\end{figure}
+
+Table~\ref{tab:headline} gives the grokking step at a fixed expert count. The
+ordering spans a factor of $27$ between the fastest factorisation and the
+slowest, with the unfactorised mixture failing on all three seeds.
+
+\begin{table}[ht]
+\centering
+\caption{Steps to $95\%$ test accuracy at $N = 256$ composed experts, mean
+$\pm$ sd over three seeds. The dense MLP has no experts and is shown for
+reference.}
+\label{tab:headline}
+\begin{tabular}{lrrr}
+\toprule
+Architecture & Parameters & Grokking step & Final test acc. \\
+\midrule
+Tucker            &  287\,968 & $\mathbf{600 \pm 100}$ & $1.000$ \\
+Dense MLP         &   34\,113 & $1667 \pm 58$          & $0.996$ \\
+Tensor-Train      &   78\,480 & $2033 \pm 58$          & $1.000$ \\
+CP                &   61\,952 & $2267 \pm 289$         & $1.000$ \\
+MONET-HD          &   59\,792 & $5333 \pm 1986$        & $0.998$ \\
+MONET-VD          &   59\,792 & $16400 \pm 6861$       & $0.986$ \\
+Unfactorised MoE  &  739\,712 & never (0/3)            & $0.001$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two observations do not follow from the ordering itself. The unfactorised
+mixture holds the largest parameter budget of the seven and is the only one
+that fails, so capacity is not what is being measured. And the spread across
+seeds differs by two orders of magnitude between architectures: Tucker's seeds
+grok at $500$, $600$ and $700$ steps, while MONET-VD's grok at $8600$, $19100$
+and $21500$. Reliability under reinitialisation is itself a function of the
+factorisation; we return to this in Section~\ref{sec:res-stability}.
+
+\subsection{The expert-count effect has no single sign}
+\label{sec:res-scaling}
+
+Table~\ref{tab:scaling} gives the grokking step as the expert count grows from
+$16$ to $4096$ for every architecture.
+
+\begin{table}[ht]
+\centering
+\caption{Steps to $95\%$ test accuracy against expert count, mean $\pm$ sd over
+three seeds. ``fail'' means no seed reached the threshold; a bracketed fraction
+gives the number that did where some did not. The unfactorised layer is not run
+beyond $N = 1024$.}
+\label{tab:scaling}
+\footnotesize
+\begin{tabular}{lrrrrrr}
+\toprule
+$N$ & Tucker & CP & Tensor-Train & MONET-HD & MONET-VD & Unfactorised \\
+\midrule
+   16 & $967 \pm 208$ & $7900$\,[1/3]  & $1300 \pm 361$ & $2967 \pm 351$  & fail & $2733 \pm 252$ \\
+   64 & $900 \pm 436$ & $2967 \pm 404$ & $1767 \pm 907$ & $5233 \pm 702$  & fail & $7733 \pm 1762$ \\
+  256 & $600 \pm 100$ & $2267 \pm 289$ & $2033 \pm 58$  & $5333 \pm 1986$ & $16400 \pm 6861$ & fail \\
+ 1024 & $500 \pm 100$ & $2067 \pm 58$  & $2500 \pm 436$ & $8500 \pm 656$  & fail & fail \\
+ 4096 & $533 \pm 58$  & $2000 \pm 100$ & $4567 \pm 709$ & $21850 \pm 6010$\,[2/3] & fail & --- \\
+\midrule
+trend & $\downarrow$ & $\downarrow$ & $\uparrow$ & $\uparrow$ & --- & collapse \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Adding experts helps two architectures, hurts two, and destroys one. Tucker
+improves by a factor of $1.9$ from $N = 16$ to $N = 1024$ and still generalises
+on every seed at $N = 4096$. CP improves by $4.0\times$, and the shape of that
+improvement is the more telling half of it: at $N = 16$ only one seed in three
+generalises at all, so for CP a small expert count is the failure regime.
+Tensor-Train moves the other way, degrading by $3.5\times$, and MONET-HD by
+$7.4\times$, with one seed in three no longer generalising at $N = 4096$. The
+unfactorised mixture generalises at $N = 16$ and $N = 64$ and then fails on
+every seed at $N = 256$, reaching training accuracy $1.000$ with test
+accuracies $0.0004$, $0.0000$ and $0.0027$.
+
+MONET-VD stands apart: it fails at $N = 16$, $64$, $1024$ and $4096$, and
+generalises only at $N = 256$. This is not a trend with an exception but a
+single window in an otherwise failing architecture, and we have no explanation
+for it.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.85\textwidth]{fig2_grok_vs_experts.pdf}
+\caption{Steps to generalisation against the number of composed experts.
+Crosses mark configurations where no seed reached the threshold. The curves do
+not share a direction: Tucker and CP slope down, Tensor-Train and MONET-HD
+slope up, and the unfactorised mixture terminates.}
+\label{fig:scaling}
+\end{figure}
+
+The claim that more experts is better is therefore not a property of mixtures
+of experts. Nor --- and this is where our initial expectation was wrong --- is
+it settled by whether the expert tensor is factorised at all. Tensor-Train
+shares a basis as thoroughly as Tucker does, and keeps it as clean
+(Table~\ref{tab:basis-scaling}), yet its grokking step rises with scale while
+Tucker's falls. What the results establish is weaker and more specific: the
+sign of the effect is a property of the particular factorisation, and a claim
+of the form ``more experts is better'' has to be made one architecture at a
+time.
+
+\subsection{What survives scaling is the basis, not the router}
+
+The task supplies an independent view of the same models: since the
+generalising algorithm must represent operands through Fourier frequencies, we
+can ask which frequencies each layer uses, and how that changes as experts are
+added.
+
+Figure~\ref{fig:spectra} shows the pooled power spectrum of the shared basis at
+$N = 256$ for seed $0$. Averaged over three seeds, the dense MLP spreads its
+representation almost evenly, using $38.1$ of the $56$ available frequencies;
+MONET-HD concentrates on $7.6$; the Tucker layer solves the same task with $1.7$. A layer with $287\,968$ parameters represents the task in a
+two-dimensional frequency subspace, while a layer with $34\,113$ parameters
+spreads it over nearly forty.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{fig5_spectra.pdf}
+\caption{Pooled Fourier power of the shared basis as a function of the operand,
+at $N = 256$, seed $0$. The effective frequency count is the participation ratio
+of the pooled spectrum; three-seed means are given in
+Table~\ref{tab:basis-scaling}.}
+\label{fig:spectra}
+\end{figure}
+
+Table~\ref{tab:basis-scaling} tracks this along the expert-count axis, and it
+separates the architectures differently from Table~\ref{tab:scaling}. Tucker
+and Tensor-Train both hold a narrow, clean basis as the layer grows: Tucker
+between $1.5$ and $1.8$ effective frequencies across a $256\times$ range, and
+Tensor-Train at $1.1$--$1.2$ from $N = 256$ upward with purity above $0.94$.
+CP broadens steadily ($14.1 \to 35.6$) while its purity nonetheless rises, and
+the product-key layers deteriorate on both measures at once --- MONET-HD from
+purity $0.891$ and $8.5$ frequencies to $0.150$ and $29.3$, MONET-VD from
+$0.881$ and $15.9$ to $0.276$ and $53.4$, against a white-noise purity
+reference of $0.082$.
+
+\begin{table}[ht]
+\centering
+\caption{Effective number of frequencies in the shared basis (top) and
+norm-weighted spectral purity (bottom), mean over three seeds. The task has
+$56$ frequencies in total; random weights score purity $0.082$.}
+\label{tab:basis-scaling}
+\footnotesize
+\begin{tabular}{lrrrrrr}
+\toprule
+$N$ & Tucker & CP & Tensor-Train & MONET-HD & MONET-VD & Unfactorised \\
+\midrule
+\multicolumn{7}{l}{\emph{effective frequencies}} \\
+   16 & $1.8$ & $14.1$ & $4.1$  & $8.5$  & $15.9$ & $36.4$ \\
+   64 & $1.5$ & $19.2$ & $2.9$  & $8.5$  & $14.5$ & $28.4$ \\
+  256 & $1.7$ & $21.7$ & $1.1$  & $7.6$  & $15.9$ & $53.6$ \\
+ 1024 & $1.7$ & $31.9$ & $1.2$  & $15.0$ & $39.8$ & $55.5$ \\
+ 4096 & $1.6$ & $35.6$ & $18.6$ & $29.3$ & $53.4$ & --- \\
+\midrule
+\multicolumn{7}{l}{\emph{basis purity}} \\
+   16 & $0.865$ & $0.611$ & $0.713$ & $0.891$ & $0.881$ & $0.824$ \\
+   64 & $0.940$ & $0.780$ & $0.732$ & $0.811$ & $0.864$ & $0.796$ \\
+  256 & $0.914$ & $0.867$ & $0.948$ & $0.691$ & $0.834$ & $0.138$ \\
+ 1024 & $0.953$ & $0.879$ & $0.963$ & $0.242$ & $0.606$ & $0.091$ \\
+ 4096 & $0.951$ & $0.906$ & $0.682$ & $0.150$ & $0.276$ & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Tensor-Train's apparent collapse at $N = 4096$ is an averaging artefact worth
+naming: two of its three seeds hold purity $0.976$ and $0.978$ at $1.11$ and
+$1.16$ frequencies, while the third drops to $0.092$ at $53.5$ frequencies ---
+and reaches $100\%$ test accuracy anyway, by some route we have not identified.
+The mean of $0.682$ describes neither.
+
+The configurations that fail to generalise are the endpoint of this trend
+rather than a separate phenomenon. The unfactorised mixture reaches purity
+$0.138$ with $53.6$ effective frequencies at $N = 256$, and $0.091$ with $55.5$
+of the available $56$ at $N = 1024$: a representation indistinguishable from
+noise, produced by a network that fits its training set perfectly.
+
+Across the mixture family, narrower frequency budgets accompany earlier
+generalisation, but only loosely: over the $78$ generalising mixture runs the
+rank correlation between effective frequency count and grokking step is
+$\rho = 0.54$ (Figure~\ref{fig:freqgrok}). These runs share seeds and their
+architectures are nested, so the coefficient summarises the scatter rather than
+testing a hypothesis. Two systematic exceptions are visible in it. The dense MLP
+uses the widest frequency budget of any model here and still generalises faster
+than every product-key variant, and CP broadens its basis steadily with scale
+while its grokking step falls. Frequency sparsity is therefore neither necessary
+nor sufficient for fast generalisation, and we describe the relationship as a
+regularity within the family rather than as a mechanism.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.8\textwidth]{fig3_freqs_vs_grok.pdf}
+\caption{Effective number of frequencies in the shared basis against steps to
+generalisation, one point per generalising run. Note the dense MLP (blue), which combines the widest frequency budget with one of the lowest grokking steps.}
+\label{fig:freqgrok}
+\end{figure}
+
+\paragraph{The router empties out.}
+\label{sec:res-router-consequence} Applying the same analysis to the router
+gives the most uniform result in this study. Under one-hot inputs the router
+logits are a learned lookup table indexed by the operand, so their spectrum is
+as directly interpretable as the basis's. Table~\ref{tab:router-scaling} shows
+what happens to it.
+
+\begin{table}[ht]
+\centering
+\caption{Norm-weighted spectral purity of the router keys against expert count,
+mean over three seeds. Values at or below the white-noise reference of $0.082$
+are in bold. Every architecture decays; none recovers.}
+\label{tab:router-scaling}
+\footnotesize
+\begin{tabular}{lrrrrrr}
+\toprule
+$N$ & Tucker & CP & Tensor-Train & MONET-HD & MONET-VD & Unfactorised \\
+\midrule
+   16 & $0.622$ & $0.575$ & $0.607$ & $0.204$ & $0.336$ & $0.552$ \\
+   64 & $0.525$ & $0.258$ & $0.458$ & $0.215$ & $0.632$ & $0.570$ \\
+  256 & $0.143$ & $0.143$ & $0.177$ & $0.163$ & $0.383$ & $\mathbf{0.089}$ \\
+ 1024 & $\mathbf{0.072}$ & $\mathbf{0.077}$ & $\mathbf{0.082}$ & $0.192$ & $0.194$ & $\mathbf{0.074}$ \\
+ 4096 & $\mathbf{0.048}$ & $\mathbf{0.056}$ & $\mathbf{0.059}$ & $0.093$ & $\mathbf{0.076}$ & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At $N = 16$ every router carries visible structure, scoring between $0.20$ and
+$0.62$ against a noise floor of $0.082$. By $N = 4096$ every router has fallen to between $0.048$ and $0.093$: at or
+below the noise floor for five of the six architectures, and within $14\%$ of it
+for the sixth. The decay holds across all six architectures --- the ones that generalise faster with scale and the ones
+that generalise slower, the ones whose bases stay clean and the ones whose
+bases decay alongside. Whatever else the choice of factorisation decides, it
+does not decide this: adding experts empties the router of interpretable
+structure.
+
+The contrast with the basis is sharpest where the basis survives. A Tucker
+layer at $N = 4096$ has basis purity $0.951$ and router purity $0.048$: the
+computation sits entirely in the shared factors, and the routing weights carry
+less frequency structure than random numbers. Figure~\ref{fig:purity} compares
+the two components across architectures, and Figure~\ref{fig:tables} shows them
+side by side for a single layer. A complementary measure --- the overlap
+between the pooled router spectrum and the pooled basis spectrum, computed on
+seed $0$ --- gives the same ordering, with Tucker layers at $0.01$--$0.10$
+against $0.46$--$0.78$ for the product-key layers and $0.93$ for the
+unfactorised mixture that fails.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{fig4_purity_basis_vs_router.pdf}
+\caption{Norm-weighted spectral purity of the shared expert basis (left)
+and of the router keys (right) against expert count, averaged over three
+seeds. The dotted line is the purity of a white-noise table ($0.082$).
+The dense MLP has neither a basis nor a router and is therefore absent.
+The Tucker and CP bases stay clean across the whole sweep, and Tensor-Train's
+does except for one seed at $N = 4096$; every router decays to the noise floor.}
+\label{fig:purity}
+\end{figure}
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=\textwidth]{fig6_tables.pdf}
+\caption{Shared basis (left) and router keys (right) of a Tucker layer as
+functions of the first operand, rows sorted by dominant frequency and
+normalised individually, with pooled spectra below. The basis is periodic and
+concentrated; the router is not.}
+\label{fig:tables}
+\end{figure}
+
+This is the observation with the most direct consequence for practice, and the
+next section shows how far it reaches. MONET identifies specialised experts by
+routing-score skew, and operates at $N = 262\,144$ --- far beyond the point
+where, on this task, the router's frequency content has already fallen to
+noise. What such a criterion can still recover at that scale, and what it
+cannot, is the subject of Section~\ref{sec:res-mixed}.
+
+\subsection{A positive control: what routing scores do recover}
+\label{sec:res-mixed}
+
+Every measurement so far is frequency-based, because on single-task modular
+addition there is no partition of the input to be specialised towards. The
+mixed dataset of Section~\ref{sec:method} supplies one: addition and
+multiplication examples over the same operand grid, distinguished by a task
+token appended to the input. Here class-based criteria apply, so MONET's own
+procedure can be run end to end and checked against ablation --- on a task
+where the partition is known exactly. It serves as a positive control: if the
+procedure finds nothing here, the negative results above would be evidence
+about our measurements rather than about the models.
+
+Both architectures learn the mixed task, and the expert-count trends of
+Section~\ref{sec:res-scaling} survive it in weakened form. Tucker generalises
+in $1700$, $1800$ and $2100$ steps at $N = 256$, $1024$ and $4096$, so its
+improvement with expert count disappears; MONET-HD fails at $N = 256$ and
+takes $8800$ and $17300$ steps at the two larger counts, degrading about twice
+as steeply as on the single task. Adding a second subtask narrows both windows.
+
+\paragraph{Procedure.} We follow MONET: a unit is assigned to a subtask when
+its mean routing score on that subtask exceeds its score on the other by a
+factor of two, and the assignment is then checked by ablation. Two adaptations
+are forced by product-key composition. First, a composed expert $(i,j)$ cannot
+be ablated individually --- the layer never materialises it, contracting $g^{(1)}$
+and $g^{(2)}$ separately --- so we score and ablate the $2Hn$ \emph{factors}
+instead, which are the objects the parameters actually correspond to. Second,
+ablation sets the factor's routing weight to zero without renormalising the
+remainder, so a removed factor contributes nothing, including through its bias
+terms. We report accuracy separately on each subtask, and against a control
+that ablates the same number of factors chosen uniformly at random, averaged
+over twenty draws.
+
+\begin{table}[ht]
+\centering
+\caption{Applying MONET's specialisation criterion on the mixed task, seed $0$.
+``Flagged'' counts the factors assigned to addition, out of $2Hn$. $\Delta$ is
+the drop in accuracy on each subtask when those factors are ablated, and
+selectivity is $\Delta_{\text{add}} - \Delta_{\text{mul}}$. The control ablates
+the same number of factors at random, averaged over twenty draws. MONET-HD at
+$N = 256$ did not generalise and is excluded.}
+\label{tab:mixed}
+\footnotesize
+\begin{tabular}{lrrrrrr}
+\toprule
+ & & \multicolumn{3}{c}{criterion} & \multicolumn{2}{c}{random control} \\
+\cmidrule(lr){3-5}\cmidrule(lr){6-7}
+Architecture & $N$ & flagged & $\Delta_{\text{add}}$ & selectivity
+& $\Delta_{\text{add}}$ & selectivity \\
+\midrule
+MONET-HD & $1024$ & $33/128$ & $0.981$ & $\mathbf{0.983}$ & $0.601$ & $0.121$ \\
+MONET-HD & $4096$ & $51/256$ & $0.965$ & $\mathbf{0.969}$ & $0.269$ & $-0.237$ \\
+Tucker   & $256$  & $31/64$  & $0.987$ & $\mathbf{0.987}$ & $0.233$ & $0.211$ \\
+Tucker   & $1024$ & $51/128$ & $0.993$ & $\mathbf{0.993}$ & $0.021$ & $-0.058$ \\
+Tucker   & $4096$ & $67/256$ & $0.991$ & $\mathbf{0.991}$ & $0.005$ & $0.003$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{The criterion passes, and passes at every scale.} Table~\ref{tab:mixed}
+is unambiguous. Ablating the factors that routing scores assign to addition
+removes addition entirely --- accuracy falls by $0.97$ to $0.99$ --- and leaves
+multiplication untouched, with $\Delta_{\text{mul}}$ between $-0.004$ and
+$0.000$ in every configuration. The random control removes the same number of
+factors and damages both subtasks indiscriminately, with selectivity ranging
+from $0.21$ down to $-0.24$. The effect does not weaken with expert count: at
+$N = 4096$, where the same routers score $0.048$ and $0.093$ on spectral
+purity against a white-noise floor of $0.082$, selectivity is still $0.99$.
+
+One feature of the table is a check on the procedure rather than a result.
+No factor on the first side of the router is ever flagged. With
+$d_{\text{in}} = 228$ the router's split places the whole of $\mathrm{onehot}(a)$
+on the first side and the task token on the second, so the first side cannot
+see which subtask an example belongs to and correctly reports no
+specialisation. The method is not producing noise; it finds structure exactly
+where structure exists.
+
+\paragraph{What this does to the router result.} The two halves of the study
+now say something sharper than either does alone. The same routers that have
+lost their frequency content by $N = 4096$ still carry the subtask partition
+perfectly, and routing-score attribution recovers it with near-perfect
+selectivity. A router is therefore not emptied by scale in any absolute sense.
+What it loses is the structure that implements the algorithm; what it keeps is
+the structure the input already announces.
+
+This is a worse position for routing-score interpretability than a simple
+failure would be. The criterion and the ablation agree here because both read
+the same partition, so their agreement validates the partition rather than the
+mechanism, and a method that checks one against the other cannot tell the
+difference. MONET's domains --- Python, chemistry, toxic text --- are partitions
+of the first kind, largely readable from the tokens themselves. A routing-based
+criterion will find experts that track them, the ablation check will confirm
+it, and none of that is evidence about how the model computes anything.
+
+\subsection{Ablations}
+\label{sec:res-ablations}
+
+Four ablations at $N = 256$ and $N = 4096$, seed $0$, isolate mechanisms that
+would otherwise remain conjectural. Results are in Table~\ref{tab:ablations};
+the baseline column repeats the corresponding main-grid run for the same seed.
+
+\begin{table}[ht]
+\centering
+\caption{Ablations, seed 0. ``fail'' gives the final test accuracy in
+parentheses. The baseline configuration is a natural input split,
+$\lambda = 10^{-3}$, router keys decayed, $80\%$ training fraction.}
+\label{tab:ablations}
+\footnotesize
+\begin{tabular}{llrrr}
+\toprule
+Ablation & Architecture & \multicolumn{3}{c}{Grokking step} \\
+\midrule
+\emph{Router-key decay} & & decayed & exempt & \\
+& Tucker, $N{=}256$       & $600$  & $600$ & \\
+& Tucker, $N{=}4096$      & $600$  & $600$ & \\
+& MONET-HD, $N{=}256$     & $7600$ & $6600$ & \\
+& MONET-HD, $N{=}4096$    & $17600$ & fail $(0.090)$ & \\
+& Unfactorised, $N{=}256$ & fail $(0.000)$ & fail $(0.007)$ & \\
+\midrule
+\emph{Router input split} & & natural & interleaved & random \\
+& Tucker, $N{=}256$   & $600$  & $5100$ & $1700$ \\
+& MONET-HD, $N{=}256$ & $7600$ & fail $(0.823)$ & fail $(0.822)$ \\
+\midrule
+\emph{Auxiliary loss $\lambda$} & & $0$ & $10^{-3}$ & $10^{-2}$ \\
+& Tucker, $N{=}256$   & $500$  & $600$  & $800$ \\
+& MONET-HD, $N{=}256$ & $6500$ & $7600$ & $3000$ \\
+\midrule
+\emph{Training fraction} & & $0.4$ & $0.6$ & $0.8$ \\
+& Tucker, $N{=}256$   & $6300$ & $800$  & $600$ \\
+& MONET-HD, $N{=}256$ & fail $(0.004)$ & $8200$ & $7600$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Router-key decay matters where memorisation is cheap.} Under one-hot
+inputs the router keys form a table of $4nP$ parameters addressed directly by
+the operand value --- $7232$ of them at $N = 256$ and $28\,928$ at $N = 4096$.
+Exempting them from weight decay, as is conventional for router parameters,
+leaves that table unregularised. At the $80\%$ training fraction used
+throughout, the cost appears only where the table is largest: MONET-HD at
+$N = 4096$ stops generalising entirely, while at $N = 256$ the difference
+($7600$ against $6600$) sits well inside that configuration's seed spread of
+$\pm 1986$. For Tucker the ablation makes no difference at either expert count.
+
+The effect is far larger when data is scarcer. During protocol selection
+(Section~\ref{sec:protocol}) we compared the two settings at a $50\%$ training
+fraction with $N = 256$: with the keys exempt, test accuracy was $0.006$; with
+the keys decayed, the layer grokked at step $15\,000$ and reached $0.977$.
+Both the data fraction and the expert count control how attractive the
+memorisation shortcut is, and the convention of exempting router parameters is
+safe only while it stays unattractive --- which is not something one can assume
+without checking.
+
+\paragraph{The natural input split matters, and unequally.} When the router's
+two halves are the two operands, the factorisation of the router matches the
+factorisation of the task. Permuting the input destroys that alignment.
+MONET-HD then fails under both permutations, reaching only $0.82$ test
+accuracy; Tucker survives both, slowed by $8.5\times$ under interleaving and
+$2.8\times$ under a random permutation. Part of the advantage we report is
+therefore due to structural alignment rather than to factorisation as such, and
+the effect is large enough to state plainly rather than file under caveats. It
+is also informative that the two architectures depend on it to different
+degrees: alignment is what lets the product-key layer work here at all, while
+for Tucker it is an accelerant.
+
+\paragraph{The auxiliary losses do little.} MONET's uniformity and ambiguity
+terms move Tucker's grokking step from $500$ at $\lambda = 0$ to $600$ and
+$800$ as $\lambda$ rises --- a mild cost. For MONET-HD the three values give
+$6500$, $7600$ and $3000$, which is not monotone and sits inside the seed
+spread for that configuration. Since these terms were calibrated for language
+modelling, where cross-entropy never approaches zero, their near-neutrality on
+an algorithmic task is unsurprising. What is worth recording is that they are
+not a prerequisite for anything we observe: the frequency structure and the
+router decay both appear at $\lambda = 0$.
+
+\paragraph{Data efficiency follows the same ordering.} At a $40\%$ training
+fraction Tucker still generalises, in $6300$ steps, while MONET-HD does not
+generalise at all ($0.004$ test accuracy). At $60\%$ Tucker takes $800$ steps
+and MONET-HD $8200$. The gap widens as data is withdrawn, which is what one
+expects if the shared basis acts as a prior rather than as extra capacity.
+
+\subsection{The rank effect has no single sign either}
+\label{sec:res-rank}
+
+The architectures that improve with expert count share a property: their
+capacity along the expert modes grows with $n$. Our Tucker layer uses an
+expert-mode rank of $\min(32, n)$ and CP projects onto $n$ columns, so both
+widen as experts are added. Tensor-Train does not: its two expert-mode cores
+are joined through a bond whose rank we held fixed at $16$ across the whole
+sweep. A natural account of why Tensor-Train degrades while Tucker improves is
+therefore that its added experts cannot refine the computation and can only be
+used to fit the training set. Two experiments test that account, and they
+disagree with each other.
+
+\begin{table}[ht]
+\centering
+\caption{Rank sweep, seed $0$. Grokking step, with parameter count in
+parentheses for the Tensor-Train rows. ``fail'' gives the final test accuracy.
+The Tucker row freezes the expert-mode rank at $4$ so that it cannot grow with
+$n$; the main-grid Tucker layer, whose rank is $\min(32, n)$, generalises in
+$600$ steps at both $N = 256$ and $N = 4096$ on this seed.}
+\label{tab:rank}
+\footnotesize
+\begin{tabular}{lccc}
+\toprule
+ & $N = 256$ & $N = 1024$ & $N = 4096$ \\
+\midrule
+\multicolumn{4}{l}{\emph{Tensor-Train}} \\
+rank $8$  & $1400$ ($31$K)           & $2800$ ($47$K)            & $4300$ ($78$K) \\
+rank $16$ & $2100$ ($78$K)           & $2000$ ($97$K)            & $4700$ ($135$K) \\
+rank $32$ & fail $(0.866)$ ($266$K)  & $5600$ ($298$K)           & $7100$ ($360$K) \\
+rank $64$ & fail $(0.022)$ ($1014$K) & fail $(0.187)$ ($1095$K)  & $16\,300$ ($1257$K) \\
+\midrule
+\multicolumn{4}{l}{\emph{Tucker}} \\
+rank $4$, frozen & fail $(0.301)$ & $1800$ & $2400$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Giving Tensor-Train more rank makes it worse, not better.} The
+prediction fails on both counts. The grokking step still rises with expert
+count at every rank tested --- from $1400$ to $4300$ at rank $8$, from $2100$
+to $4700$ at rank $16$, from $5600$ to $7100$ at rank $32$ --- so the upward
+trend is not an artefact of the bottleneck we happened to fix. And raising the
+rank does not help at any expert count. It hurts everywhere, and beyond rank
+$16$ it opens a failure region that widens as the rank grows: at rank $64$ and
+$N = 256$ a layer holding over a million parameters fits the training set
+perfectly and reaches test accuracy $0.022$.
+
+What the sweep does track is parameter count. Rank enters the Tensor-Train
+parameter count multiplicatively, so rank $64$ costs between $16$ and $33$
+times rank $8$ at the same expert count, and the configurations that fail are
+those where that cost is largest relative to the number of experts it buys.
+This is the signature of the unfactorised mixture, which generalises at
+$N = 64$ with $189\,000$ parameters and fails at $N = 256$ with $740\,000$. We
+record it as a description rather than a mechanism: it orders the Tensor-Train
+family and does not transfer across architectures, since a Tucker layer with
+$288\,000$ parameters generalises at $N = 256$ in $600$ steps.
+
+\paragraph{Freezing Tucker's rank removes its improvement.} The converse test
+holds the Tucker expert-mode rank at $4$ so that it cannot grow with $n$. The
+improvement disappears. At $N = 256$ the layer fails --- not by memorising but
+by failing to fit at all, reaching training accuracy $0.432$ --- and beyond
+that it degrades from $1800$ to $2400$ steps as experts are added, where the
+unfrozen layer stays near $600$ throughout. On the Tucker side, then, growing
+rank is exactly what converts added experts into faster generalisation.
+
+Taken together the two experiments say something narrower than the account they
+were built to test, and something that echoes
+Section~\ref{sec:res-scaling}: rank growth is what lets Tucker benefit from
+added experts, and the absence of rank growth is not what stops Tensor-Train.
+The sign of the rank effect, like the sign of the expert-count effect, is a
+property of the particular factorisation.
+
+\paragraph{A reproducible anomaly.} Section~\ref{sec:res-stability} reports one
+main-grid Tensor-Train seed that reaches perfect test accuracy at $N = 4096$
+with a basis indistinguishable from noise. The rank sweep reproduces it on
+demand: at rank $32$ and $N = 4096$ the layer generalises in $7100$ steps with
+basis purity $0.081$ and $55.9$ effective frequencies, and at rank $64$ and
+$N = 4096$ it reaches $0.998$ test accuracy with purity $0.082$. The effect is
+systematic at high rank rather than a rare initialisation. We read it as a
+limitation of the measurement rather than of the model: what we extract as the
+shared basis of a Tensor-Train layer is its input core, and at high rank the
+operand representation evidently moves elsewhere along the chain. The
+Tensor-Train entries of Table~\ref{tab:basis-scaling} should be read with that
+in mind.
+
+One positive result comes out of the same runs. Tucker with rank $4$ reaches
+basis purity $0.995$ and $0.993$ at $1.01$ effective frequencies for
+$N = 1024$ and $N = 4096$ --- the cleanest representations anywhere in this
+study, produced by layers of $31\,000$ and $60\,000$ parameters. A rank-four
+expert basis solves modular addition with what is essentially a single
+frequency.
+
+\subsection{How much of the Tucker core is used}
+\label{sec:res-comp}
+
+Two facts established above point at the same object. Tucker generalises
+fastest of the layers we compare, and it is also the multilinear layer whose
+parameter count still rises steeply with expert count
+(Table~\ref{tab:params}). Both properties live in the core, which is the only
+place where the two expert modes interact. We therefore constrain that
+interaction and ask how much of it the task actually uses.
+
+Write the expert-mode slice of the core at rank $r$,
+\begin{equation}
+\mathcal{Z}[p, q, a, c]
+  \;=\; \sum_{s=1}^{r} W[p, q, s]\, C^{(a)}[s, a]\, C^{(b)}[s, c],
+\end{equation}
+so that $r = 1$ makes the layer's dependence on the two routing vectors
+separable, and the dense core is recovered at $r = R_a^2$, which is $256$ at
+$N = 256$ and $1024$ above it. The initialisation is scaled so that the
+implied core entries have the same variance at every $r$, and the rearranged
+forward pass is verified against the naive sum over all $n^2$ composed experts
+in the same way as the other layers.
+
+One thing this family does \emph{not} do should be said before the numbers.
+At $r = 1$ it does not reduce to product-key composition. MONET's layers apply
+a nonlinearity between the two factors and are therefore not multilinear,
+whereas a rank-one multilinear coupling is a strictly weaker object: a
+trilinear form of rank one. The sweep varies how much the two expert modes may
+interact inside a multilinear layer; it does not interpolate towards MONET.
+
+\begin{table}[ht]
+\centering
+\caption{Composition-rank sweep, seed $0$. Grokking step, with parameter count
+in parentheses. ``fail'' gives the final test accuracy; at ranks $1$ and $2$
+the layer does not fit the training set either, reaching training accuracy
+$0.23$ and $0.53$ at $N = 256$. The dense row repeats the three-seed means of
+Table~\ref{tab:scaling} and the parameter counts of Table~\ref{tab:params}.}
+\label{tab:comp}
+\footnotesize
+\begin{tabular}{lccc}
+\toprule
+coupling rank & $N = 256$ & $N = 1024$ & $N = 4096$ \\
+\midrule
+$1$     & fail $(0.005)$ & fail $(0.007)$ & fail $(0.035)$ \\
+$2$     & fail $(0.016)$ & fail $(0.029)$ & fail $(0.025)$ \\
+$4$     & fail $(0.671)$ & fail $(0.475)$ & $1200$ \quad ($77$K) \\
+$8$     & $800$ \quad ($34$K) & $900$ \quad ($51$K) & $800$ \quad ($82$K) \\
+$16$    & $700$ \quad ($43$K) & $500$ \quad ($59$K) & $500$ \quad ($90$K) \\
+$32$    & $600$ \quad ($60$K) & $500$ \quad ($77$K) & $500$ \quad ($108$K) \\
+\midrule
+dense   & $600$ \quad ($288$K) & $500$ \quad ($1090$K) & $533$ \quad ($1121$K) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{A threshold, then nothing.} Table~\ref{tab:comp} shows a sharp
+transition rather than a gradual trade-off. At ranks $1$ and $2$ the layer
+cannot fit the training set, let alone generalise. At rank $4$ it fits but
+generalises only at the largest expert count. From rank $8$ upward it
+generalises everywhere, and from rank $16$ it is indistinguishable from the
+dense core: $700$, $500$ and $500$ steps against $600$, $500$ and $533$, all
+within the seed spread that Section~\ref{sec:res-stability} reports for this
+architecture.
+
+\paragraph{The dense core is over-provisioned by an order of magnitude.} The
+rank-$32$ layer at $N = 4096$ holds $107\,616$ parameters against $1\,121\,376$
+for the dense core --- a factor of $10.4$ --- and generalises in $500$ steps
+against $533 \pm 58$. Measured across the sweep, the parameter growth from
+$N = 256$ to $N = 4096$ falls from $3.89\times$ to $1.81\times$. A coupling of
+rank $32$ out of a possible $1024$, or of rank $8$ out of $1024$ at a cost of
+one generalisation step in five, is all the task uses.
+
+This bears directly on the objection MONET raises against multilinear expert
+layers (Section~\ref{sec:related}), that their parameter counts grow too
+quickly with expert count to compete with product-key composition. On this
+task the growth is real but almost entirely unused: it sits in core entries
+that carry no signal, and constraining the coupling removes most of it at no
+measurable cost in generalisation speed. The comparison between the two
+families is therefore not settled by the parameter counts of the layers as
+published.
+
+\paragraph{Experts partly substitute for coupling.} At rank $4$ the layer
+fails at $N = 256$ and $N = 1024$ and generalises at $N = 4096$. Where the
+coupling is too poor to express the task at one expert count, adding experts
+can recover it --- another instance of the window of Section~\ref{sec:res-scaling},
+now with one of its two coordinates under direct control.
+
+\subsection{Stability under reinitialisation}
+\label{sec:res-stability}
+
+A final observation emerges only with multiple seeds. At $N = 256$ the standard
+deviation of the grokking step is $100$ steps for Tucker, $58$ for
+Tensor-Train and the dense MLP, $289$ for CP, but $1986$ for MONET-HD and
+$6861$ for MONET-VD, whose individual seeds grok at $8600$, $19100$ and
+$21500$ --- a spread wider than the entire range separating the other six
+architectures.
+
+Instability also appears at the largest expert counts in architectures that are
+otherwise stable, and not only in the grokking step: the Tensor-Train seed
+described above, which collapses to a noise-like basis at $N = 4096$ while
+still reaching perfect accuracy, has no counterpart among its siblings.
+Averages at $N = 4096$ should be read with this in mind.
+
+Product-key composition is thus not only slower but far less predictable, and a
+single-seed comparison of these architectures would be seriously misleading in
+either direction. This is consistent with the weak universality reported for
+group-composition tasks by \citet{chughtai2023universality}, and it is why the
+claims in this section are stated over seeds rather than over runs.

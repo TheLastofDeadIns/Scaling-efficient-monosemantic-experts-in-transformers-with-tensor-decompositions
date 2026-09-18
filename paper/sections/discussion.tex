@@ -1,0 +1,218 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{What the results do and do not show}
+
+We began with the expectation that the architectures would order themselves by
+how much of the expert parameterisation is shared: independent experts at one
+end, product-key composition in the middle, multilinear factorisations at the
+other, with generalisation improving monotonically along that axis. The two
+endpoints behave as expected. The middle does not survive contact with the
+data, because Tensor-Train sits firmly at the shared end and scales like the
+product-key layers rather than like Tucker.
+
+What remains is a weaker and more useful statement. Every architecture we
+tested has a window of expert counts in which it generalises, and the
+factorisation determines where that window sits and how wide it is.
+Independent experts have the narrowest: they work at $N = 16$ and $N = 64$ and
+fail completely at $N = 256$. CP has a window with a visible lower edge --- at
+$N = 16$ two seeds in three fail --- and no upper edge within our range.
+Tucker's window covers the entire range, with its best performance at the top.
+MONET-HD degrades steadily and begins to fail at $N = 4096$. Whether adding
+experts helps is therefore a question about where a given architecture
+currently sits in its own window, not a question about mixtures of experts.
+
+Two mechanisms plausibly set the two edges, and the ablations let us say
+something about each rather than speculate.
+
+The upper edge is at least partly the router. Under one-hot inputs the router
+keys form a table of $4nP$ parameters addressed directly by the operand, and it
+grows linearly in $n$. Section~\ref{sec:res-ablations} shows this is a real
+memorisation channel and not a hypothetical one: at $N = 4096$, exempting those
+keys from weight decay costs MONET-HD generalisation outright, and at a $50\%$
+training fraction the same exemption is the difference between $0.006$ and
+$0.977$ test accuracy. The channel is harmless while memorisation is
+unattractive and becomes decisive when it is not, which is exactly the regime
+large expert counts create.
+
+The lower edge is partly rank starvation in the expert modes, but only on one
+side. Our Tucker layer uses an expert-mode rank of $\min(32, n)$, so at $n = 4$
+the routing coefficients are compressed into a four-dimensional space and the
+experts are nearly indistinguishable; CP at $n = 4$ projects a rank-$128$
+factor onto four columns. Both architectures are at their worst there, and both
+improve as $n$ rises to meet their rank. Section~\ref{sec:res-rank} tests this
+directly by freezing the Tucker rank at $4$, and the improvement disappears:
+the layer stops fitting at all at $N = 256$ and then slows from $1800$ to
+$2400$ steps as experts are added, where the unfrozen layer stays near $600$.
+
+The same account predicted that Tensor-Train, whose expert-mode bond we held at
+rank $16$ throughout the sweep, would be rescued by letting that rank grow. It
+is not. Raising the rank leaves the upward trend in expert count intact at
+every value tested and makes the layer worse at every expert count, opening a
+failure region that widens with rank until, at rank $64$ and $N = 256$, a
+layer of over a million parameters memorises the training set and reaches
+$0.022$ test accuracy. We state the prediction and its failure because the
+failure is the more informative half. The sign of the rank effect turns out to
+be a property of the particular factorisation, exactly as the sign of the
+expert-count effect is, and our search for a single quantity that sets the
+direction for every architecture has now come up empty twice. The upper-edge
+account stands as it is, since the router ablation supports it directly.
+
+\subsection{Consequences for routing-score interpretability}
+
+The router result is the one that does not depend on which architecture is
+better. Across all six mixture layers, and regardless of whether that layer
+generalises sooner or later with scale, the spectral purity of the router keys
+falls as experts are added, reaching the white-noise floor by $N = 4096$. In
+the same layers where the shared basis stays clean --- Tucker at purity
+$0.951$, Tensor-Train at $0.976$ on the seeds that behave --- the router has
+fallen to $0.048$ and $0.059$. The computation and the routing end up in
+different places, and the gap widens with scale.
+
+The obvious reading of that --- routing scores stop being informative at scale
+--- is wrong, and Section~\ref{sec:res-mixed} shows why. On the mixed task the
+same routers at the same expert count support MONET's criterion perfectly:
+factors assigned to a subtask by routing-score skew are exactly the factors
+whose removal destroys that subtask and spares the other, with selectivity
+$0.99$ at $N = 4096$. A router that scores at the white-noise floor on
+frequency content is still a flawless detector of which subtask it is looking
+at.
+
+The correct statement is therefore about what kind of structure survives.
+Routing scores recover partitions that the input already carries, and miss the
+structure that performs the computation; scaling drains the second and leaves
+the first. This is a more uncomfortable position for routing-based
+interpretability than plain uninformativeness would be. A method that
+identifies experts by routing-score skew and validates the identification by
+ablation is checking one reading of the partition against another, so the two
+agree by construction, and the agreement certifies nothing about mechanism.
+Nothing inside such a method signals which of the two situations it is in.
+MONET's domains --- Python, chemistry, toxic text --- are partitions of the
+kind that is largely readable from the tokens, which is precisely the regime
+where the criterion will look most convincing and mean least.
+
+We would not extrapolate to language models on the strength of one algorithmic
+testbed. What the testbed establishes is that the dissociation can occur, that
+the frequency half of it strengthens with scale, and that the standard
+validation procedure cannot detect it. Testing for it in a language model does
+not require Fourier analysis: it requires a task where the mechanism is known
+independently of the domain label, so that routing-score attribution can be
+scored against something other than the partition it was derived from.
+
+\subsection{Limitations}
+\label{sec:limitations}
+
+\paragraph{Structural alignment.} The multilinear layers compute a product of a
+factor depending on $a$ and a factor depending on $b$, and the Fourier solution
+of modular addition has exactly that form. The architecture is aligned with the
+target function in a way specific to this task. We measured the size of that
+advantage rather than leaving it as a caveat: permuting the router's input so
+that its halves are no longer the two operands slows Tucker by $8.5\times$
+under interleaving and $2.8\times$ under a random permutation, and makes
+MONET-HD fail entirely. Alignment therefore accounts for a substantial part of
+what we report, and the correct statement of the result is that a decomposition
+whose structure matches the structure of the task both generalises sooner and
+yields a sparser representation in the task's own basis. Establishing anything
+more general requires tasks whose solutions are not multiplicative in the
+operands.
+
+\paragraph{One task, one modulus.} All results are for $c = (a+b) \bmod 113$
+with one-hot inputs and a single hidden layer. Nothing here demonstrates
+transfer to language models, which is where MONET operates and where the
+monosemanticity claims we examine were made.
+
+\paragraph{Mechanisms are partly tested.} The router-table account of the upper
+edge is supported by the ablations, and the rank account of the lower edge has
+now been tested on both sides: confirmed for Tucker, refuted for Tensor-Train,
+which leaves the Tensor-Train trend without a mechanism. The first in particular rests on an
+architectural detail of our own configuration and has not been tested by
+varying the ranks.
+
+\paragraph{Frequency sparsity is a correlate, not a law.} Within the mixture
+family, narrower frequency budgets accompany earlier generalisation, but the
+dense MLP violates the trend, using $38.1$ effective frequencies and still
+generalising faster than every product-key variant. CP broadens its basis
+steadily with scale while its grokking step falls. We therefore describe the
+relationship as a regularity within the family rather than as a mechanism.
+
+\paragraph{Unexplained cases.} MONET-VD fails at $N = 16$, $64$, $1024$ and
+$4096$ and generalises only at $N = 256$; we report this rather than omit it,
+and have no account of it. One Tensor-Train seed at $N = 4096$ reaches perfect test accuracy with a basis
+indistinguishable from noise; Section~\ref{sec:res-rank} shows this is
+systematic at high rank and is most likely a limitation of how we extract the
+basis for this format rather than a property of the model.
+
+\paragraph{Fixed data partition and single-seed ablations.} Seeds vary
+initialisation only; the train/test split is held fixed, which isolates
+initialisation variance but says nothing about sensitivity to which pairs are
+withheld. The ablations use one seed, so the differences reported there are not
+protected against the seed variance that Section~\ref{sec:res-stability}
+documents for the product-key layers in particular.
+
+The mixed-task control of Section~\ref{sec:res-mixed} is likewise seed $0$
+only, and ablates router factors rather than composed experts, which
+product-key composition does not allow to be removed individually.
+
+\subsection{Future work}
+\label{sec:future}
+
+The most direct continuation is the decomposition this study did not train.
+Section~\ref{sec:res-comp} shows that most of that growth is unused, which
+makes the hierarchical format a way of removing it by construction rather
+than by a rank constraint imposed after the fact.
+Tucker performs best here, but its core grows as $\prod_n R_n$, which is why
+its parameter count still rises steeply with expert count in
+Table~\ref{tab:params} while CP's and Tensor-Train's do not. The hierarchical
+Tucker format \citep{grasedyck2010hierarchical} removes that growth: instead of
+one dense core, the modes are arranged on a binary tree with a small transfer
+tensor at each internal node, giving parameter count linear rather than
+exponential in the order while retaining the pairwise mode interactions that CP
+lacks.
+
+Applied to an expert layer the construction is natural. Factor the expert index
+into $L$ binary modes, $N = 2^L$, and place them at the leaves of a balanced
+tree. Routing then becomes hierarchical: a token descends the tree, making one
+binary decision per level, and selects an expert in $O(\log N)$ rather than
+$O(\sqrt{N})$ decisions. Two properties follow that bear on the questions
+raised here. The internal nodes carry representations at intermediate levels of
+granularity, so the hierarchy itself becomes an object of interpretation ---
+coarse concepts near the root, fine ones near the leaves --- rather than only
+the leaves, as in a flat expert set. And the transfer tensors are shared across
+all experts beneath a node, so sharing is graded by depth rather than fixed by
+a single global choice. Given that our results turn on where each
+architecture's usable window of expert counts sits, an architecture with a
+tunable sharing gradient is the natural instrument for asking what sets the
+edges of that window.
+
+Three further directions follow from the limitations. Identifying what does set the direction for Tensor-Train, now that rank is
+ruled out, together with an extraction of the operand representation from the
+whole core chain rather than from the input core alone. Tasks whose solutions are not
+multiplicative in the operands, which would separate the effect of
+factorisation from the effect of structural alignment. And the same
+router-versus-mechanism comparison on a small language model, where the shared
+basis cannot be Fourier-analysed but routing-score attribution and ablation can
+still be set against each other.
+
+\section{Conclusion}
+
+We asked whether scaling the number of experts in a Mixture-of-Experts layer
+makes it more interpretable, on a task where the answer can be checked rather
+than illustrated. It does not, and the reason is more specific than we
+expected. Adding experts brings generalisation forward for some factorisations
+of the expert tensor, pushes it back for others, and destroys it for
+independent experts --- with Tensor-Train and Tucker landing on opposite sides
+despite sharing their parameters equally thoroughly. Each architecture has a
+window of expert counts in which it works, and the factorisation sets where
+that window lies.
+
+One result holds across all of them. As experts are added, the router's
+frequency content decays to noise in every mixture architecture we tested,
+while the shared basis of the best-scaling ones stays clean --- so the
+computation and the routing end up in different places, and the gap widens
+with scale. The router does not go blank: on a control task whose subtask is
+signalled in the input, routing-score attribution still identifies the
+responsible factors perfectly at the largest expert count we tested. What it
+recovers is the partition the input already carries; what it misses is the
+structure that performs the computation, and from inside the method the two
+look the same. Whether that dissociation holds in language models is the
+question this testbed was built to make askable.

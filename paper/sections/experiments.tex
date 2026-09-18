@@ -1,0 +1,128 @@
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Selecting the training regime}
+\label{sec:protocol}
+
+Grokking on modular addition occurs only within a narrow band of
+hyperparameters, and the band depends on the architecture. Since the grokking
+step is our principal measurement, the regime was fixed by a sweep before any
+architectural comparison, rather than assumed from the literature.
+
+Table~\ref{tab:regime} reports the dense MLP under three training fractions
+and two weight-decay settings. The pattern is unambiguous. At a $30\%$
+training fraction the network memorises completely --- training accuracy
+reaches $1.0$ within two thousand steps --- while test accuracy creeps to
+$5.5\%$ by step $30\,000$ and never generalises within budget. At $80\%$ the
+transition occurs at step $2000$. Weight decay $3.0$ destroys generalisation
+at every fraction.
+
+\begin{table}[t]
+\centering
+\caption{Dense MLP baseline: grokking step and final test accuracy across
+training regimes. A grokking step of ``---'' means the $95\%$ threshold was
+never reached within $30\,000$ steps.}
+\label{tab:regime}
+\begin{tabular}{llrr}
+\toprule
+Train fraction & Weight decay & Grokking step & Final test acc. \\
+\midrule
+0.3 & 1.0 & --- & 0.055 \\
+0.3 & 3.0 & --- & 0.000 \\
+0.5 & 1.0 & 8500 & 0.985 \\
+0.5 & 3.0 & --- & 0.554 \\
+0.8 & 1.0 & 2000 & 0.995 \\
+0.8 & 3.0 & --- & 0.775 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+We initially selected a $30\%$ training fraction, following the transformer
+setting of \citet{nanda2023progress}. That choice turned out to be wrong for
+this architecture: with one-hot inputs and no embedding layer, each pair
+activates a unique pair of coordinates, so memorisation is cheap and $30\%$ of
+the grid gives the network no reason to search for the generalising algorithm.
+The MLP reference of \citet{bussmann2023modadd} uses $80\%$, and that is the
+regime adopted here. We report the sweep rather than silently adopting the
+final setting, because the failure mode it reveals --- an architecture that
+looks incapable of generalising when it is merely under-supplied with data ---
+recurs below for the Mixture-of-Experts layers and is easy to mistake for an
+architectural result.
+
+\subsection{Main comparison}
+
+The principal experiment holds the task, data, split and optimiser fixed and
+varies only the representation of the expert tensor. The six mixture layers are trained at $N \in \{16, 64, 256, 1024, 4096\}$
+composed experts, with three seeds per configuration, and the dense MLP is
+trained under the same protocol as an $N$-independent reference, giving the
+grokking step, final accuracy, effective frequency count, spectral purity and
+router--basis overlap for each. The
+unfactorised layer is capped at $N = 1024$ for the reason given in
+Section~\ref{sec:method}.
+
+Three questions are asked of these runs. Does the number of experts help or
+hurt, and does the answer depend on the factorisation? Does the representation
+that a factorised layer learns differ from a dense layer's in the basis the
+task defines? And where in the layer --- router or shared basis --- does the
+structure that implements the algorithm reside?
+
+\subsection{Ablations}
+\label{sec:ablations}
+
+Four ablations isolate mechanisms that would otherwise remain conjectural.
+
+\paragraph{Router-key weight decay.} Whether the router keys are subject to
+weight decay. Under one-hot inputs the keys form a lookup table of $4 n P$
+free parameters addressed directly by the operand value. If the usual
+convention of exempting router parameters from decay is followed, that table
+constitutes an unregularised memorisation mechanism, and the prediction is
+that generalisation should fail at large $N$ and be rescued by decaying the
+keys.
+
+\paragraph{Router input split.} Whether the two halves of the router input are
+the two operands (the natural split), or an interleaving or random permutation
+of the input coordinates. Under the natural split the factorisation of the
+router matches the factorisation of the task, which arguably hands the model
+the structure it is supposed to discover. The permuted variants test whether
+the observed behaviour survives when that alignment is removed.
+
+\paragraph{Auxiliary loss weight.} The coefficient $\lambda \in \{0, 10^{-3},
+10^{-2}\}$ on MONET's uniformity and ambiguity terms. These were calibrated
+for language modelling, where cross-entropy never approaches zero. On an
+algorithmic task the cross-entropy does approach zero after memorisation, at
+which point the auxiliary terms can exceed it in magnitude and begin to
+dominate the gradient.
+
+\paragraph{Training fraction.} Fractions $\{0.4, 0.6, 0.8\}$ for a
+shared-basis and a product-key layer, locating the data threshold at which
+each architecture stops generalising.
+
+\subsection{What we deliberately do not measure}
+
+One family of metrics is absent from this study by design. Both MONET and
+\citet{oldfield2024mumoe} score expert specialisation over classes or domains:
+an expert belongs to a domain if its routing score is skewed towards it, or if
+ablating it costs accuracy on one class in particular. Neither criterion is
+meaningful on single-task modular addition. There is no domain structure to be
+skewed towards, and every frequency participates in predicting every value of
+$c$, so an expert cannot be class-specialised even in principle. Applying
+those criteria here would produce a null result that says nothing about the
+criteria and nothing about the models.
+
+Our measurements are therefore frequency-based throughout: purity, effective
+frequency count, and router--basis overlap, all defined against the task's
+known solution rather than against a class partition. The claim in
+Section~\ref{sec:res-router-consequence} is correspondingly narrow --- that
+the router stops carrying the structure that implements the computation, which
+is a statement about where the mechanism lives, not a direct test of MONET's
+attribution procedure.
+
+Running that direct test needs a task with both a known algorithm and a genuine
+partition of the input distribution. The mixed dataset of
+Section~\ref{sec:method} was built for it: addition and multiplication examples
+distinguished by a task token, where specialisation by subtask is possible in
+principle and class-based criteria can be applied and checked against ablation.
+Section~\ref{sec:res-mixed} reports that test. It matters in both directions:
+it tells us what routing-score attribution recovers when a partition is
+present, and it establishes that the frequency-based null results above are
+properties of the single task rather than of our instruments.

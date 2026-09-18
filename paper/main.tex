@@ -1,0 +1,168 @@
+\documentclass[a4paper,12pt]{extarticle}
+\usepackage{geometry}
+\usepackage[T2A,T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[main=english,russian]{babel}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{fancyhdr}
+\usepackage{setspace}
+\usepackage{graphicx}
+\usepackage{colortbl}
+\usepackage{subcaption}
+\usepackage{listings}
+\usepackage{indentfirst}
+\usepackage[
+backend=biber,
+style=numeric,
+natbib=true,
+urldate=long,
+maxbibnames=99
+]{biblatex}
+\addbibresource{refs.bib}
+\usepackage[colorlinks,citecolor=blue,linkcolor=blue,bookmarks=false,
+            hypertexnames=true,urlcolor=blue,breaklinks=true]{hyperref}
+\usepackage{xurl}
+\usepackage{mathtools}
+\usepackage{booktabs}
+\usepackage[flushleft]{threeparttable}
+\usepackage{tablefootnote}
+
+\usepackage{chngcntr}
+\counterwithin{table}{section}
+\counterwithin{figure}{section}
+
+\graphicspath{{figures/}{graphics/}}
+\emergencystretch=3em
+
+\geometry{left=2.5cm}
+\geometry{right=1.0cm}
+\geometry{top=2.0cm}
+\geometry{bottom=2.0cm}
+\setlength{\parindent}{1.25cm}
+\renewcommand{\baselinestretch}{1.5}
+
+\renewcommand{\theenumi}{\arabic{enumi}}
+\renewcommand{\labelenumi}{\arabic{enumi}}
+\renewcommand{\theenumii}{.\arabic{enumii}}
+\renewcommand{\labelenumii}{\arabic{enumi}.\arabic{enumii}.}
+\renewcommand{\theenumiii}{.\arabic{enumiii}}
+\renewcommand{\labelenumiii}{\arabic{enumi}.\arabic{enumii}.\arabic{enumiii}.}
+
+% ---- notation used throughout -------------------------------------------- %
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Zp}{\mathbb{Z}_P}
+\newcommand{\gvec}{\hat{g}}
+\DeclareMathOperator{\softmax}{softmax}
+\DeclareMathOperator{\TopK}{TopK}
+
+\begin{document}
+\input{title_kr}
+\newpage
+\setcounter{page}{2}
+
+{
+	\hypersetup{linkcolor=black}
+	\tableofcontents
+}
+
+\newpage
+
+% ---- annotation ----------------------------------------------------------- %
+\section*{Annotation}
+\addcontentsline{toc}{section}{Annotation}
+
+Mixture-of-Experts layers are increasingly proposed as a route to interpretable
+language models, on the argument that scaling the number of experts makes
+individual experts monosemantic. That argument has so far been evaluated only
+on natural language, where the features a model ought to represent are unknown,
+so claims about expert specialisation cannot be checked against an answer key.
+We move the question to modular addition, an algorithmic task whose
+generalising solution is known exactly: the network must represent each operand
+through a small set of Fourier frequencies. On this testbed we train seven layer
+types under a single protocol --- a dense MLP, an unfactorised
+Mixture-of-Experts, MONET's horizontal and vertical product-key decompositions,
+and CP, Tucker and Tensor-Train factorisations of the expert tensor --- and
+measure when each one stops memorising and starts generalising.
+
+We report three findings. First, the \emph{sign} of the effect of adding
+experts is set by the particular factorisation rather than by factorisation as
+such: time to generalisation falls with expert count for Tucker and CP layers,
+rises for Tensor-Train and product-key layers, and collapses into outright
+failure for independent experts beyond 64. Second, factorisations with a shared
+basis compress the frequency content of the learned representation by more than
+an order of magnitude relative to a dense layer, and the product-key layers lose
+that compression as they grow. 
+
+Third, scaling drains the router of algorithmic structure but not of all
+structure: as the expert count reaches 4096 the spectral purity of the router
+keys falls to the white-noise floor in every mixture architecture we test, to
+0.048--0.093 against a floor of 0.082, while a Tucker layer's shared basis
+stays clean --- yet on a two-subtask control whose subtask is signalled in the
+input, the same routers at the same scale support MONET's attribution
+criterion perfectly, selecting factors whose ablation destroys one subtask and
+spares the other with selectivity 0.99. Routing scores recover partitions the
+input already carries and miss the structure that performs the computation,
+and nothing within the method distinguishes the two cases.
+
+\section*{\foreignlanguage{russian}{Аннотация}}
+\addcontentsline{toc}{section}{\foreignlanguage{russian}{Аннотация}}
+\foreignlanguage{russian}{
+Архитектуры Mixture-of-Experts всё чаще предлагаются как путь к
+интерпретируемым языковым моделям: считается, что рост числа экспертов делает
+отдельных экспертов моносемантичными. До сих пор этот тезис проверялся только
+на естественном языке, где истинные признаки неизвестны, а значит утверждения
+о специализации экспертов не с чем сверить. Мы переносим вопрос на модульное
+сложение --- алгоритмическую задачу, обобщающее решение которой известно
+точно: сеть должна представлять операнды через небольшой набор частот Фурье.
+На этом тестбеде мы обучаем по единому протоколу семь типов слоёв: плотный
+MLP, неразложенный MoE, горизонтальное и вертикальное продуктовые разложения
+MONET, а также CP-, Tucker- и TT-разложения экспертного тензора.
+
+Получены три результата. Во-первых, знак эффекта от увеличения числа
+экспертов определяется конкретным разложением, а не фактом факторизации как
+таковым: время до обобщения падает с ростом числа экспертов у Tucker- и
+CP-слоёв, растёт у TT- и продуктовых слоёв и переходит в полный отказ у
+независимых экспертов. Во-вторых, разложения с общим базисом сжимают частотное
+содержание выученного представления более чем на порядок по сравнению с плотным
+слоем, а продуктовые слои теряют это сжатие по мере роста. 
+
+В-третьих, масштабирование лишает роутер алгоритмической структуры, но не
+всякой: при 4096 экспертах спектральная чистота ключей падает до уровня белого
+шума во всех рассмотренных архитектурах --- до $0{,}048$--$0{,}093$ при пороге
+$0{,}082$, --- тогда как общий базис Tucker-слоя остаётся чистым. При этом на
+контрольной задаче из двух подзадач, признак которой явно подан на вход, те же
+роутеры при том же масштабе безошибочно поддерживают критерий MONET: отобранные
+по routing-score факторы при отключении уничтожают свою подзадачу и не задевают
+вторую, избирательность $0{,}99$. Routing scores восстанавливают разбиения, уже
+заложенные во входе, и не видят структуру, которая выполняет вычисление, причём
+сам метод эти два случая не различает.
+}
+
+\section*{Keywords}
+\addcontentsline{toc}{section}{Keywords}
+
+Mixture of experts, tensor decompositions, Tucker decomposition, mechanistic
+interpretability, monosemanticity, grokking, modular arithmetic, Fourier
+analysis.
+
+\pagebreak
+
+% ---- body ----------------------------------------------------------------- %
+\input{sections/introduction}
+\input{sections/related_work}
+\input{sections/background}
+\input{sections/method}
+\input{sections/experiments}
+\input{sections/results}
+\input{sections/discussion}
+
+\newpage
+\printbibliography[heading=bibintoc]
+
+\newpage
+\appendix
+\input{sections/appendix}
+
+\end{document}

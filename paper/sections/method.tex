@@ -1,0 +1,142 @@
+\section{Method}
+\label{sec:method}
+
+\subsection{Task and encoding}
+
+We train on $c = (a+b) \bmod P$ with $P = 113$, over the full grid of $P^2 =
+12\,769$ ordered pairs. The input is the concatenation of two one-hot vectors,
+$x = [\,\mathrm{onehot}(a) \,\|\, \mathrm{onehot}(b)\,] \in \R^{2P}$, and the
+output is a distribution over the $P$ possible values of $c$. No embedding
+layer is used, following \citet{bussmann2023modadd}.
+
+This encoding is chosen deliberately rather than for convenience. Because the
+first $P$ coordinates of $x$ depend only on $a$ and the next $P$ only on $b$,
+any weight matrix acting on the input decomposes into a block that is a
+function of $a$ and a block that is a function of $b$. Its discrete Fourier
+transform along either block is therefore directly interpretable, with no
+probing, no auxiliary model, and no approximation. The same applies to router
+keys, which under one-hot inputs reduce to learned lookup tables indexed by
+the operand value.
+
+A second dataset is used as a positive control in
+Section~\ref{sec:experiments}: examples are drawn from two subtasks,
+$(a+b) \bmod P$ and $(a \cdot b) \bmod P$, with a one-hot task token appended
+to the input. Here a genuine two-way partition of the input distribution
+exists, so expert specialisation by subtask is possible in principle and can
+be detected. Its role is to distinguish a negative specialisation result on
+the single task from an artefact of the measurement.
+
+\subsection{Architectures}
+
+Every model consists of a single hidden layer mapping $\R^{2P} \to \R^{P}$.
+The baseline is a dense two-layer MLP with $100$ hidden units and ReLU. The
+six Mixture-of-Experts variants share one product-key router, defined in
+Equation~\eqref{eq:product-key}, with $n$ keys per side, $N = n^2$ composed
+experts, four heads, and top-$k$ selection with $k = 4$. They differ only in
+how the expert tensor is represented: unfactorised, MONET-HD, MONET-VD, CP
+(rank $128$), Tucker (rank $32$) and Tensor-Train (rank $16$). Expert
+dimension is $m = 8$ throughout.
+
+We sweep $n \in \{4, 8, 16, 32, 64\}$, that is $N$ from $16$ to $4096$. The
+unfactorised layer is capped at $n \le 32$, since its parameter count grows
+linearly in $N$ and at $n = 64$ it would hold $11.7$M parameters against
+$239$K for MONET at the same expert count; beyond that point the comparison
+measures capacity rather than structure.
+
+Two deviations from \citet{park2025monet} are worth stating. First, MONET
+estimates routing quantiles with BatchNorm to avoid a hardware-unfriendly
+top-$k$; at $N \le 4096$ an exact top-$k$ is inexpensive, so we use it, and
+retain BatchNorm as an option. Second, the auxiliary losses below are computed
+on the full softmax rather than on the top-$k$-masked weights, which contain
+exact zeros.
+
+\subsection{Training protocol}
+
+All models are trained full-batch with AdamW, learning rate $10^{-3}$,
+$\beta = (0.9, 0.98)$, weight decay $1.0$, gradient clipping at norm $1.0$,
+for $30\,000$ steps. The training split is $80\%$ of the grid, chosen once per
+dataset and held fixed across all runs and seeds; Section~\ref{sec:protocol}
+reports the sweep that led to this choice.
+
+Following MONET we add a uniformity and an ambiguity term to the
+cross-entropy,
+\begin{equation}
+  \mathcal{L}
+  = \mathcal{L}_{\mathrm{CE}}
+  + \lambda\big(\mathcal{L}_{\mathrm{unif}} + \mathcal{L}_{\mathrm{amb}}\big),
+  \qquad \lambda = 10^{-3},
+\end{equation}
+where $\mathcal{L}_{\mathrm{unif}}$ penalises routing distributions that
+deviate from uniform and $\mathcal{L}_{\mathrm{amb}}$ penalises routing
+distributions that are not peaked, the two acting in opposition.
+
+Weight decay is applied to weight matrices and, importantly, to the router
+keys; biases and normalisation parameters are exempt. This is not the usual
+convention, and Section~\ref{sec:ablations} shows it is necessary: under
+one-hot inputs the router keys form a lookup table indexed by the operand, so
+leaving them unregularised hands the model an unpenalised memorisation
+mechanism.
+
+The seed controls weight initialisation only. The train/test partition is
+identical across seeds, so the reported spread measures variation due to
+initialisation at fixed data, not variation due to resampling. We use three
+seeds for every configuration that carries a claim.
+
+\subsection{Metrics}
+
+\paragraph{Grokking step.} The first optimisation step at which test accuracy
+reaches $95\%$, evaluated every $100$ steps. Runs that never reach it within
+the budget are reported as failures rather than assigned a censored value.
+
+\paragraph{Spectral purity.} Let $f \in \R^{P}$ be the response of a unit as a
+function of one operand. We remove its mean, take the discrete Fourier
+transform, and normalise the power spectrum over frequencies $k = 1, \ldots,
+(P-1)/2$ so that it sums to one. Purity is the share of the strongest
+component,
+\begin{equation}
+  \mathrm{purity}(f) = \max_k \, \hat{p}_k .
+\end{equation}
+A value of $1$ means the unit is a pure single-frequency detector, which is
+what monosemanticity means on this task. The DC component is dropped because a
+constant offset carries no information about which residue class a unit
+responds to.
+
+When averaging across units we weight each unit by the $L_2$ norm of its
+mean-removed response. Unused units still produce a noise spectrum, and an
+unweighted mean is dragged down as soon as a layer leaves capacity idle;
+weighting measures the purity of the units that actually carry signal. As a
+reference point, white-noise units of the same dimension score $0.082$, and
+all purity values below should be read against that floor.
+
+\paragraph{Effective number of frequencies.} Purity describes single units;
+the layer as a whole is described by pooling the normalised spectra of all its
+units into $\bar{p}$ and taking the participation ratio
+\begin{equation}
+  n_{\mathrm{eff}} = \Big(\textstyle\sum_k \bar{p}_k^2\Big)^{-1}.
+\end{equation}
+This counts how many frequencies the layer actually uses, without a threshold:
+a single pure tone gives $1$, a flat spectrum gives $56$. We prefer it to
+counting frequencies above a fixed share of the mass, which is
+threshold-sensitive and degenerates for layers that spread power evenly.
+
+\paragraph{Router--basis spectral overlap.} Both the shared basis and the
+router keys yield pooled spectra, $\bar{p}^{\mathrm{basis}}$ and
+$\bar{p}^{\mathrm{router}}$. Their overlap is the total variation-style
+intersection
+\begin{equation}
+  \mathrm{overlap} = \sum_k \min\!\big(\bar{p}^{\mathrm{basis}}_k,\,
+  \bar{p}^{\mathrm{router}}_k\big) \in [0,1],
+\end{equation}
+which is $1$ when the two components operate on identical frequencies and $0$
+when they are disjoint. Independent random spectra give roughly $0.7$, so
+values well below that indicate active separation rather than chance.
+
+\subsection{Reproducibility}
+
+All analysis is performed on NumPy from archived weights; the router is
+re-derived analytically rather than by running the model, which is exact under
+one-hot inputs. The rearranged forward passes, which compute each factorised
+layer without materialising the $N$-expert tensor, are verified against the
+naive per-expert sum to machine precision for all six MoE variants; the test
+is included in the repository. Code and aggregated run summaries are available at
+\url{https://github.com/TheLastofDeadIns/Scaling-efficient-monosemantic-experts-in-transformers-with-tensor-decompositions}.
