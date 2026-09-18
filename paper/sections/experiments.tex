@@ -14,14 +14,15 @@ and two weight-decay settings. The pattern is unambiguous. At a $30\%$
 training fraction the network memorises completely --- training accuracy
 reaches $1.0$ within two thousand steps --- while test accuracy creeps to
 $5.5\%$ by step $30\,000$ and never generalises within budget. At $80\%$ the
-transition occurs at step $2000$. Weight decay $3.0$ destroys generalisation
-at every fraction.
+transition occurs at step $2000$. Weight decay $3.0$ keeps test accuracy below the threshold at every fraction, reaching $0.775$ at best.
 
 \begin{table}[t]
 \centering
-\caption{Dense MLP baseline: grokking step and final test accuracy across
-training regimes. A grokking step of ``---'' means the $95\%$ threshold was
-never reached within $30\,000$ steps.}
+\caption{Dense MLP baseline, seed $0$: grokking step and final test accuracy
+across training regimes. A grokking step of ``---'' means the $95\%$ threshold
+was never reached within $30\,000$ steps. The $80\%$ row is a single seed and
+gives $2000$, against the three-seed mean $1667 \pm 58$ of
+Table~\ref{tab:headline}.}
 \label{tab:regime}
 \begin{tabular}{llrr}
 \toprule

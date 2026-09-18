@@ -124,9 +124,50 @@ monosemanticity claims we examine were made.
 \paragraph{Mechanisms are partly tested.} The router-table account of the upper
 edge is supported by the ablations, and the rank account of the lower edge has
 now been tested on both sides: confirmed for Tucker, refuted for Tensor-Train,
-which leaves the Tensor-Train trend without a mechanism. The first in particular rests on an
-architectural detail of our own configuration and has not been tested by
-varying the ranks.
+which leaves the Tensor-Train trend without a mechanism.
+
+\paragraph{Ranks and widths are not matched.} CP is given rank $128$, Tucker
+$32$, Tensor-Train $16$, and every layer an expert dimension of $8$. These were
+chosen to put the architectures in a comparable parameter range rather than by
+any principle, and Section~\ref{sec:res-comp} shows that at least one of them
+is an order of magnitude from binding. Differences we attribute to the
+structure of a decomposition may therefore be partly differences in how
+generously each one happens to be provisioned.
+
+\paragraph{One training regime, selected on one architecture.} The protocol of
+Section~\ref{sec:protocol} was fixed by a sweep over the dense MLP and then
+applied unchanged to every Mixture-of-Experts layer, although
+Section~\ref{sec:protocol} itself observes that the grokking band depends on
+the architecture. Learning rate, weight decay, the Adam betas and the
+auxiliary weight are therefore tuned for one member of the comparison and
+inherited by the other six. This is the largest confound in the study. It
+bears most heavily on the configurations that fail: MONET-VD fails at four of
+five expert counts and generalises at one, and we cannot distinguish an
+architectural property from a regime that suits it badly at the other four.
+
+\paragraph{Weight decay is not the same regulariser in every format.} An $L_2$
+penalty applied to CP factors induces a penalty on the reconstructed tensor
+close to a nuclear norm; applied to a Tucker core and its factors it induces a
+different one; applied to a chain of Tensor-Train cores, a third. Holding the
+coefficient at $1.0$ across architectures therefore does not hold the
+regularisation fixed --- it varies it in a way determined by the very
+factorisation we are trying to isolate. This is a plausible partial account of
+why the sign of the expert-count effect differs between formats, and it is not
+one our experiments can separate from the structural account we give.
+
+\paragraph{Seeds are uneven across experiments.} Section~\ref{sec:method}
+states that three seeds are used for every configuration carrying a claim, and
+that holds for the main grid and for the router-key decay ablation. It does
+not hold for the remaining ablations, the rank sweeps of
+Sections~\ref{sec:res-rank} and~\ref{sec:res-comp}, or the mixed-task control,
+all of which are seed $0$. For architectures whose seed spread reaches $6861$
+steps, single-seed differences below roughly $2000$ steps should be read as
+suggestive.
+
+\paragraph{Degradation factors are lower bounds.} Failed runs are excluded
+from the averages rather than assigned the step budget, so a statement such as
+``MONET-HD degrades by $7.4\times$'' compares the seeds that survived at each
+expert count. Where some seeds fail at
 
 \paragraph{Frequency sparsity is a correlate, not a law.} Within the mixture
 family, narrower frequency budgets accompany earlier generalisation, but the
@@ -145,9 +186,9 @@ basis for this format rather than a property of the model.
 \paragraph{Fixed data partition and single-seed ablations.} Seeds vary
 initialisation only; the train/test split is held fixed, which isolates
 initialisation variance but says nothing about sensitivity to which pairs are
-withheld. The ablations use one seed, so the differences reported there are not
+withheld. Most of the ablations use one seed, so the differences reported there are not
 protected against the seed variance that Section~\ref{sec:res-stability}
-documents for the product-key layers in particular.
+documents for the product-key layers in particular; the router-key decay ablation, on which the upper-edge account rests, is the exception and is run on three.
 
 The mixed-task control of Section~\ref{sec:res-mixed} is likewise seed $0$
 only, and ablates router factors rather than composed experts, which
@@ -157,17 +198,16 @@ product-key composition does not allow to be removed individually.
 \label{sec:future}
 
 The most direct continuation is the decomposition this study did not train.
-Section~\ref{sec:res-comp} shows that most of that growth is unused, which
-makes the hierarchical format a way of removing it by construction rather
-than by a rank constraint imposed after the fact.
 Tucker performs best here, but its core grows as $\prod_n R_n$, which is why
 its parameter count still rises steeply with expert count in
-Table~\ref{tab:params} while CP's and Tensor-Train's do not. The hierarchical
-Tucker format \citep{grasedyck2010hierarchical} removes that growth: instead of
-one dense core, the modes are arranged on a binary tree with a small transfer
-tensor at each internal node, giving parameter count linear rather than
-exponential in the order while retaining the pairwise mode interactions that CP
-lacks.
+Table~\ref{tab:params} while CP's and Tensor-Train's do not.
+Section~\ref{sec:res-comp} shows that most of that growth is unused, which
+makes the hierarchical Tucker format \citep{grasedyck2010hierarchical} a way of
+removing it by construction rather than by a rank constraint imposed after the
+fact: instead of one dense core, the modes are arranged on a binary tree with a
+small transfer tensor at each internal node, giving parameter count linear
+rather than exponential in the order while retaining the pairwise mode
+interactions that CP lacks.
 
 Applied to an expert layer the construction is natural. Factor the expert index
 into $L$ binary modes, $N = 2^L$, and place them at the leaves of a balanced

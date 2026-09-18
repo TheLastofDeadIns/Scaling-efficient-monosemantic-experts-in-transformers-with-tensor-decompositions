@@ -55,7 +55,7 @@ routing cost, since a naive softmax over $N$ experts is linear in $N$.
 \citet{lample2019productkeys} solve this with product keys: the query is split
 in half, each half is matched against $\sqrt{N}$ sub-keys, and the top-$k$
 over the Cartesian product is recovered from the top-$k$ of each half, giving
-$O(\sqrt{N})$ routing. \citet{he2024peer} combine product-key routing with
+$O(\sqrt{N})$ routing. \citet{he2024peer} combines product-key routing with
 single-neuron experts to reach a million experts per layer. In both, the
 experts themselves remain independent parameters; only the routing is
 factorised.

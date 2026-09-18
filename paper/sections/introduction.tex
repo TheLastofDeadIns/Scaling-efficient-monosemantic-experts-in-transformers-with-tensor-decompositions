@@ -63,12 +63,10 @@ seeds per configuration.
   destroys it outright for independent experts past $N = 64$. The claim that
   more experts is better is therefore not a property of mixtures of experts.
   Nor, contrary to what we expected at the outset, is it settled by whether the
-  expert tensor is factorised at all: Tensor-Train shares a basis as thoroughly
-  as Tucker and keeps it as clean, yet scales in the opposite direction.
+  expert tensor is factorised at all: Tensor-Train shares a basis as thoroughly as Tucker and keeps it as clean over the middle of the range, yet scales in the opposite direction.
 
 \item \textbf{Shared bases act as a sparsity prior in the task's own basis.}
-  A Tucker-factorised layer solves modular addition using an effective $1.6$ to
-  $1.8$ frequencies at every expert count we test, where a dense MLP spends
+  A Tucker-factorised layer solves modular addition using an effective 1.5 to 1.8 frequencies at every expert count we test, where a dense MLP spends
   $38.1$. The product-key layers begin in the same place and lose that
   compression as they grow, reaching $29.3$ frequencies at $N = 4096$ with a
   spectral purity of $0.150$ against a white-noise floor of $0.082$.
@@ -93,7 +91,11 @@ seeds per configuration.
 
 \subsection{Scope}
 
-Two limitations bound these claims and are stated in full in
+The title names transformers because the layers studied here are the
+feed-forward blocks of transformer Mixture-of-Experts models, taken out of
+that setting and trained in isolation. No transformer is trained in this work,
+and the units we analyse are the factors of an expert layer rather than whole
+experts. Two limitations bound these claims and are stated in full in
 Section~\ref{sec:limitations}. The multilinear ($\mu$MoE) layers compute a
 product of a function of $a$ and a function of $b$, which is structurally the
 same form as the Fourier solution. Section~\ref{sec:res-ablations} measures how
