@@ -27,3 +27,5 @@ runs_mixed/
 *.synctex.gz
 *.fdb_latexmk
 *.fls
+runs_comp/
+runs_kops/

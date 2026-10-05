@@ -195,6 +195,16 @@ def router_tables(run: Run) -> tuple[np.ndarray, np.ndarray] | None:
     k1, k2 = run.param("router.key1"), run.param("router.key2")
     if k1 is None:
         return None
+    if "layer.router.idx1" in run.buffers:
+        # follow-up splits ("full", "pair", k >= 3): side 1 as a function of a,
+        # side 2 as a function of b.  See kops_analysis.py for all operands.
+        from kops_data import operand_blocks
+        P, k = run.P, int(run.mcfg.get("n_operands", 2))
+        b1 = operand_blocks(np.asarray(run.buffers["layer.router.idx1"]), P, k)
+        b2 = operand_blocks(np.asarray(run.buffers["layer.router.idx2"]), P, k)
+        if 0 not in b1 or 1 not in b2:
+            return None
+        return k1[:, :, b1[0]], k2[:, :, b2[1]]
     perm = run.buffers.get("layer.router.perm")
     if perm is None:
         perm = next((v for k, v in run.buffers.items() if k.endswith("perm")), None)

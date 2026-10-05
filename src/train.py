@@ -40,7 +40,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from data import make_data, full_grid_inputs
+from data import make_data, make_sum_data, full_grid_inputs
 from model import ModelConfig, ModAddModel, router_aux_loss
 
 
@@ -60,6 +60,13 @@ class TrainConfig:
     P: int = 113
     train_frac: float = 0.8
     decay_router_keys: bool = True
+    # k-operand task (kops_data.py); defaults reproduce the main study exactly
+    n_operands: int = 2       # k in (a_1 + ... + a_k) mod P
+    n_train: int = 0          # > 0: sample this many training points instead of train_frac
+    n_test: int = 0           # test points when sampling (0: n_train // 4)
+    data_seed: int = 0        # controls the train/test split only
+    batch_size: int = 0       # 0: full batch, as in the main study
+    eval_max: int = 20000     # cap on rows used for train-accuracy / routing stats
 
 
 NO_DECAY = ("bias", "b1", "b2", "b11", "b12", "b21", "b22", "bn")
@@ -136,30 +143,71 @@ def routing_stats(model, x, chunk: int = 8192):
 
 
 def run_name(mcfg: ModelConfig, tcfg: TrainConfig) -> str:
+    extra = ""
+    if tcfg.n_operands != 2 or tcfg.P != 113:
+        extra += f"_ops{tcfg.n_operands}_P{tcfg.P}"
+    if tcfg.n_train > 0:
+        extra += f"_ntr{tcfg.n_train}"
+    if tcfg.batch_size > 0:
+        extra += f"_bs{tcfg.batch_size}"
+    if tcfg.data_seed != 0:
+        extra += f"_ds{tcfg.data_seed}"
+    if getattr(mcfg, "freeze_router", False):
+        extra += "_frz"
     return (f"{mcfg.arch}_n{mcfg.n_keys}_m{mcfg.expert_dim}_h{mcfg.n_heads}"
             f"_k{mcfg.top_k}_lam{mcfg.lambda_aux:g}_{mcfg.router_split}"
             f"_{tcfg.task}_f{tcfg.train_frac:g}_wd{tcfg.weight_decay:g}_rk{int(tcfg.decay_router_keys)}"
-            f"_s{mcfg.seed}")
+            f"{extra}_s{mcfg.seed}")
+
+
+def build_data(tcfg: TrainConfig):
+    """Main-study data unless the k-operand options are set."""
+    if tcfg.n_operands != 2 or tcfg.n_train > 0:
+        if tcfg.task != "single":
+            raise ValueError("the k-operand task supports task='single' only")
+        return make_sum_data(P=tcfg.P, k=tcfg.n_operands, train_frac=tcfg.train_frac,
+                             n_train=tcfg.n_train, n_test=tcfg.n_test,
+                             seed=tcfg.data_seed)
+    return make_data(P=tcfg.P, task=tcfg.task, train_frac=tcfg.train_frac,
+                     seed=tcfg.data_seed)
 
 
 def train_one(mcfg: ModelConfig, tcfg: TrainConfig, out_dir: Path, verbose: bool = True):
     device = torch.device(tcfg.device if torch.cuda.is_available() else "cpu")
-    data = make_data(P=tcfg.P, task=tcfg.task, train_frac=tcfg.train_frac,
-                     seed=0).to(device)
+    data = build_data(tcfg).to(device)
 
-    mcfg = dataclasses.replace(mcfg, d_in=data.d_in, d_out=data.d_out)
+    mcfg = dataclasses.replace(mcfg, d_in=data.d_in, d_out=data.d_out,
+                               n_operands=tcfg.n_operands)
     model = ModAddModel(mcfg).to(device)
+    if mcfg.freeze_router and hasattr(model.layer, "router"):
+        # frozen random router: keys stay at their random initialisation
+        for p in model.layer.router.parameters():
+            p.requires_grad_(False)
     opt = build_optimizer(model, tcfg)
 
     xtr, ytr, xte, yte = data.split()
+    ntr = xtr.shape[0]
+    # fixed subset for train-accuracy evaluation when the training set is large
+    if ntr > tcfg.eval_max:
+        sub = torch.randperm(ntr, generator=torch.Generator().manual_seed(1))[:tcfg.eval_max]
+        xtr_eval, ytr_eval = xtr[sub.to(xtr.device)], ytr[sub.to(xtr.device)]
+    else:
+        xtr_eval, ytr_eval = xtr, ytr
+    use_batches = 0 < tcfg.batch_size < ntr
+    batch_gen = torch.Generator().manual_seed(mcfg.seed + 777)
     hist = {k: [] for k in ("step", "train_loss", "test_loss", "train_acc",
                             "test_acc", "aux", "grad_norm")}
     grok_step = -1
     t0 = time.time()
 
     for step in range(tcfg.steps + 1):
-        logits = model(xtr)
-        ce = F.cross_entropy(logits, ytr)
+        if use_batches:
+            bi = torch.randint(0, ntr, (tcfg.batch_size,), generator=batch_gen).to(xtr.device)
+            logits = model(xtr[bi])
+            ce = F.cross_entropy(logits, ytr[bi])
+        else:
+            logits = model(xtr)
+            ce = F.cross_entropy(logits, ytr)
         aux = model.aux_loss()
         loss = ce + aux
 
@@ -169,7 +217,7 @@ def train_one(mcfg: ModelConfig, tcfg: TrainConfig, out_dir: Path, verbose: bool
         opt.step()
 
         if step % tcfg.eval_every == 0:
-            tr_loss, tr_acc = evaluate(model, xtr, ytr)
+            tr_loss, tr_acc = evaluate(model, xtr_eval, ytr_eval)
             te_loss, te_acc = evaluate(model, xte, yte)
             hist["step"].append(step)
             hist["train_loss"].append(tr_loss)
@@ -184,7 +232,7 @@ def train_one(mcfg: ModelConfig, tcfg: TrainConfig, out_dir: Path, verbose: bool
                 print(f"  step {step:6d}  train {tr_acc:.3f}  test {te_acc:.3f}  "
                       f"ce {ce.item():.4f}  |g| {gn:.2e}")
 
-    stats = routing_stats(model, data.x)
+    stats = routing_stats(model, data.x[: tcfg.eval_max * 2])
     final_tr_loss, final_tr_acc = evaluate(model, xtr, ytr)
     final_te_loss, final_te_acc = evaluate(model, xte, yte)
 
@@ -208,6 +256,11 @@ def train_one(mcfg: ModelConfig, tcfg: TrainConfig, out_dir: Path, verbose: bool
         "activation": mcfg.activation,
         "seed": mcfg.seed,
         "task": tcfg.task,
+        "n_operands": tcfg.n_operands,
+        "P": tcfg.P,
+        "n_train": int(ntr),
+        "batch_size": tcfg.batch_size,
+        "freeze_router": bool(mcfg.freeze_router),
         "n_params": model.n_params(),
         "grok_step": grok_step,
         "final_train_acc": final_tr_acc,

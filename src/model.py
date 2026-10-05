@@ -42,6 +42,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from kops_data import router_index_sets
+
 
 ARCHS = (
     "mlp",
@@ -73,7 +75,9 @@ class ModelConfig:
     n_heads: int = 4
     top_k: int = 4               # per side; top_k <= n_keys
     router_bn: bool = False
-    router_split: str = "natural"  # "natural" | "interleave" | "random"
+    router_split: str = "natural"  # "natural" | "interleave" | "random" | "pair" | "full"
+    n_operands: int = 2            # k in (a_1 + ... + a_k) mod P; see kops_data.py
+    freeze_router: bool = False    # keep router keys at their random init (train.py)
 
     # tensor ranks
     cp_rank: int = 128
@@ -127,11 +131,24 @@ class ProductKeyRouter(nn.Module):
         super().__init__()
         self.cfg = cfg
         d_in, n, H = cfg.d_in, cfg.n_keys, cfg.n_heads
-        half = d_in // 2
-        self.d1 = half
-        self.d2 = d_in - half
-
-        self.register_buffer("perm", self._make_perm(cfg), persistent=True)
+        sets = router_index_sets(cfg.router_split, d_in, cfg.d_out,
+                                 getattr(cfg, "n_operands", 2))
+        self.idx_mode = sets is not None
+        if not self.idx_mode:
+            # original path of the main study, kept byte-for-byte so that old
+            # runs reproduce exactly: permute, then cut the input in half
+            half = d_in // 2
+            self.d1 = half
+            self.d2 = d_in - half
+            self.register_buffer("perm", self._make_perm(cfg), persistent=True)
+        else:
+            # explicit coordinate sets per side ("full", "pair", k >= 3)
+            idx1, idx2 = sets
+            self.d1, self.d2 = int(idx1.shape[0]), int(idx2.shape[0])
+            self.register_buffer("idx1", torch.as_tensor(idx1, dtype=torch.long),
+                                 persistent=True)
+            self.register_buffer("idx2", torch.as_tensor(idx2, dtype=torch.long),
+                                 persistent=True)
 
         self.key1 = nn.Parameter(torch.empty(H, n, self.d1))
         self.key2 = nn.Parameter(torch.empty(H, n, self.d2))
@@ -156,8 +173,12 @@ class ProductKeyRouter(nn.Module):
 
     def forward(self, x: torch.Tensor):
         cfg = self.cfg
-        xp = x[:, self.perm]
-        x1, x2 = xp[:, : self.d1], xp[:, self.d1:]
+        if self.idx_mode:
+            x1 = x.index_select(1, self.idx1)
+            x2 = x.index_select(1, self.idx2)
+        else:
+            xp = x[:, self.perm]
+            x1, x2 = xp[:, : self.d1], xp[:, self.d1:]
 
         z1 = torch.einsum("bd,hnd->bhn", x1, self.key1)
         z2 = torch.einsum("bd,hnd->bhn", x2, self.key2)

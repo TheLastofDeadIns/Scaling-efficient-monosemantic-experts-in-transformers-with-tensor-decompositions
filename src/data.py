@@ -167,6 +167,54 @@ def make_data(
     )
 
 
+@dataclass
+class SumData:
+    """k-operand modular sum, c = (a_1 + ... + a_k) mod P.  See kops_data.py."""
+
+    x: torch.Tensor          # (n_samples, k * P) float32, one-hot blocks
+    y: torch.Tensor          # (n_samples,) int64 labels in [0, P)
+    ops: torch.Tensor        # (n_samples, k) int64 operands
+    train_idx: torch.Tensor
+    test_idx: torch.Tensor
+    P: int
+    k: int
+    n_tasks: int = 1
+
+    @property
+    def d_in(self) -> int:
+        return self.x.shape[1]
+
+    @property
+    def d_out(self) -> int:
+        return self.P
+
+    def to(self, device) -> "SumData":
+        return SumData(x=self.x.to(device), y=self.y.to(device),
+                       ops=self.ops.to(device), train_idx=self.train_idx.to(device),
+                       test_idx=self.test_idx.to(device), P=self.P, k=self.k)
+
+    def split(self):
+        return (self.x[self.train_idx], self.y[self.train_idx],
+                self.x[self.test_idx], self.y[self.test_idx])
+
+
+def make_sum_data(P: int, k: int, train_frac: float = 0.8, n_train: int = 0,
+                  n_test: int = 0, seed: int = 0) -> SumData:
+    """Build the k-operand dataset.  ``seed`` controls the split only."""
+    from kops_data import encode, sample_split, targets
+
+    ops, tr, te = sample_split(P, k, train_frac=train_frac, n_train=n_train,
+                               n_test=n_test, seed=seed)
+    return SumData(
+        x=torch.from_numpy(encode(ops, P)),
+        y=torch.from_numpy(targets(ops, P)).long(),
+        ops=torch.from_numpy(ops).long(),
+        train_idx=torch.from_numpy(tr).long(),
+        test_idx=torch.from_numpy(te).long(),
+        P=P, k=k,
+    )
+
+
 def full_grid_inputs(P: int, task_id: int = 0, n_tasks: int = 1) -> torch.Tensor:
     """All P^2 inputs in row-major (a, b) order, for activation-map analysis.
 
